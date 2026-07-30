@@ -514,6 +514,9 @@ void App::render() {
         float nameRight = contentLeft + contentW - AppC::CARD_INNER - delW;
         if (m_editMode == ED_EDIT_PROJECT && m_editPi == (int)pi) {
             std::wstring dtext = m_editText + m_compositionText;
+            float editW = std::max(g.measureTextW(dtext, F_PROJ_NAME) + 8.0f, 60.0f);
+            g.fillRoundedRect(D2D1::RectF(nameX - 4, screenHy, nameX + editW, screenHy + AppC::BADGE_H), 3.0f, D2D1::ColorF(C::ACCENT.r, C::ACCENT.g, C::ACCENT.b, 0.08f));
+            g.drawLine(nameX, screenHy + AppC::BADGE_H - 1, nameX + editW, screenHy + AppC::BADGE_H - 1, C::ACCENT, 1.5f);
             g.drawText(dtext, D2D1::RectF(nameX, screenHy, nameRight, screenHy + AppC::BADGE_H), F_PROJ_NAME, C::TEXT);
             float tw2 = g.measureTextW(m_editText, F_PROJ_NAME);
             float cw = g.measureTextW(m_compositionText, F_PROJ_NAME);
@@ -605,6 +608,9 @@ void App::render() {
             float ey = screenTop;
             float ew = contentW - AppC::CARD_INNER * 2 - 8.0f;
             std::wstring dtext = m_editText + m_compositionText;
+            float editW = std::max(g.measureTextW(dtext, F_PROJ_NAME) + 8.0f, 60.0f);
+            g.fillRoundedRect(D2D1::RectF(ex - 4, ey, ex + editW, ey + AppC::BADGE_H), 3.0f, D2D1::ColorF(C::ACCENT.r, C::ACCENT.g, C::ACCENT.b, 0.08f));
+            g.drawLine(ex, ey + AppC::BADGE_H - 1, ex + editW, ey + AppC::BADGE_H - 1, C::ACCENT, 1.5f);
             g.drawText(dtext, D2D1::RectF(ex, ey, ex + ew, ey + AppC::BADGE_H), F_PROJ_NAME, C::TEXT);
             float tw2 = g.measureTextW(m_editText, F_PROJ_NAME);
             float cw = g.measureTextW(m_compositionText, F_PROJ_NAME);
