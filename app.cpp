@@ -821,6 +821,10 @@ void App::tick(float dt) {
                     SetWindowPos(m_hwnd, nullptr, m_snapToX, m_snapToY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
                     m_snappedToTarget = true;
                 }
+                if (m_snapAnim < 0.02f) {
+                    LONG_PTR ex = GetWindowLongPtrW(m_hwnd, GWL_EXSTYLE);
+                    if (!(ex & WS_EX_LAYERED)) SetWindowLongPtrW(m_hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+                }
                 float alphaF = (t < 0.5f) ? 1.0f - (t / 0.5f) * (t / 0.5f) : ((t - 0.5f) / 0.5f) * ((t - 0.5f) / 0.5f);
                 SetLayeredWindowAttributes(m_hwnd, 0, (BYTE)(255.0f * alphaF), LWA_ALPHA);
                 if (t >= 0.5f) {
@@ -880,6 +884,10 @@ void App::tick(float dt) {
         }
     }
     if (m_closing) {
+        if (m_closeAnim == 0.0f) {
+            LONG_PTR ex = GetWindowLongPtrW(m_hwnd, GWL_EXSTYLE);
+            if (!(ex & WS_EX_LAYERED)) SetWindowLongPtrW(m_hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+        }
         float fadeT = m_closeAnim < 0.15f ? 0.0f : (m_closeAnim - 0.15f) / 0.85f;
         BYTE alpha = (BYTE)(255.0f * (1.0f - fadeT * fadeT * fadeT * fadeT));
         SetLayeredWindowAttributes(m_hwnd, 0, alpha, LWA_ALPHA);
