@@ -264,7 +264,7 @@ void App::positionEdit() {
         m_caretCreated = true;
     }
     SetCaretPos(x, y);
-    ShowCaret(m_hwnd);
+    HideCaret(m_hwnd);
 }
 void App::cancelEdit() {
     if (m_addingProject) { m_addingProject = false; }
