@@ -228,7 +228,7 @@ void App::beginEdit(EditMode mode, int pi, int ti, const std::wstring& initial) 
     positionEdit();
     requestRedraw();
 }
-void App::endEdit(bool applyFocus) {
+void App::endEdit(bool applyFocus) { if (m_edit) DestroyCaret();
     m_reentering = true;
     m_editMode = ED_NONE; m_editPi = -1; m_editTi = -1;
     m_compositionText.clear();
