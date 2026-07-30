@@ -80,6 +80,7 @@ private:
     HWND m_edit = nullptr;
     WNDPROC m_editOldProc = nullptr;
     bool m_reentering = false; // suppress killfocus cancel during re-focus
+    bool m_caretCreated = false; // track caret lifecycle
 
     std::vector<Project> m_projects;
     Config m_cfg;

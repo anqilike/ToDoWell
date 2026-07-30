@@ -42,7 +42,7 @@ void App::positionIME() {
     if (m_editMode != ED_PREF_PREFIX) {
         py += AppC::TITLE_H - m_scroll;
     }
-    POINT pt = { toPx(px), toPx(py) };
+    POINT pt = { toPx(px), toPx(py + AppC::ROW_H) };
     ClientToScreen(m_hwnd, &pt);
     m_imePos = pt;
     HWND imeTarget = (m_edit && IsWindowVisible(m_edit)) ? m_edit : m_hwnd;
@@ -228,7 +228,7 @@ void App::beginEdit(EditMode mode, int pi, int ti, const std::wstring& initial) 
     positionEdit();
     requestRedraw();
 }
-void App::endEdit(bool applyFocus) { if (m_edit) DestroyCaret();
+void App::endEdit(bool applyFocus) { if (m_edit && m_caretCreated) { DestroyCaret(); m_caretCreated = false; }
     m_reentering = true;
     m_editMode = ED_NONE; m_editPi = -1; m_editTi = -1;
     m_compositionText.clear();
@@ -252,7 +252,18 @@ void App::positionEdit() {
     }
     int x = toPx(cursorX);
     int y = toPx(cursorY);
-    SetWindowPos(m_edit, nullptr, x, y, 1, 1, SWP_NOZORDER | SWP_NOACTIVATE);
+    float editW = m_editRectDip.right - m_editRectDip.left;
+    if (editW < 10.0f) editW = 10.0f;
+    int w = toPx(editW);
+    int h = toPx(AppC::ROW_H - 4.0f);
+    SetWindowPos(m_edit, nullptr, toPx(m_editRectDip.left), y - h, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
+    // Create system caret once, only update position on subsequent calls
+    if (!m_caretCreated) {
+        CreateCaret(m_edit, nullptr, 1, h);
+        m_caretCreated = true;
+    }
+    SetCaretPos(toPx(textW), 0);
+    ShowCaret(m_edit);
 }
 void App::cancelEdit() {
     if (m_addingProject) { m_addingProject = false; }
@@ -675,7 +686,7 @@ void App::render() {
         D2D1_COLOR_F aboutCol = D2D1::ColorF(C::ACCENT.r, C::ACCENT.g, C::ACCENT.b, oa);
         g.drawText(L"\u5173\u4e8e ToDoWell", D2D1::RectF(dlgX + 16, ay, dlgX + dlgW - 16, ay + 18), F_HINT, aboutCol);
         g.rt->PopAxisAlignedClip();
-        g.drawText(L"\u7248\u672c 2.1.0", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.0.0", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(L"\u7248\u6743\u6240\u6709@\u5929\u624d\u76845014", D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 22, fy + 3, dlgX + dlgW - 22, fy + 23);
         m_setContentH = (ay + 20.0f + sy) - dlgY + 10.0f;
@@ -714,7 +725,7 @@ void App::render() {
         }
         g.rt->PopAxisAlignedClip();
         m_aboutContentH = (ty - sy) - dlgY + 10.0f;
-        g.drawText(L"\u7248\u672c 2.1.0", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.0.0", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(L"\u7248\u6743\u6240\u6709@\u5929\u624d\u76845014", D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
     }
 
@@ -791,6 +802,7 @@ void App::tick(float dt) {
             m_snapping = false;
             if (m_cfg.snap_anim == 1) SetLayeredWindowAttributes(m_hwnd, 0, 255, LWA_ALPHA);
             m_snapScale = 1.0f;
+            m_snapRightArmed = false; m_snapBottomArmed = false;
         }
         float t = m_snapAnim;
         int x = m_snapToX, y = m_snapToY;
@@ -913,14 +925,18 @@ void App::onMoving(RECT* r) {
     RECT wa; SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
     int dr = std::abs(r->right - wa.right), dl = std::abs(r->left - wa.left);
     int db = std::abs(r->bottom - wa.bottom), dt = std::abs(r->top - wa.top);
-    if (dr < AppC::SNAP_GAP && m_snapRightArmed) { r->left = wa.right - w; r->right = wa.right; m_snapRightArmed = false; }
-    if (dr > AppC::SNAP_GAP) { m_snapRightArmed = true; }
-    if (dl < AppC::SNAP_GAP && m_snapLeftArmed)  { r->right = wa.left + w; r->left = wa.left; m_snapLeftArmed = false; }
-    if (dl > AppC::SNAP_GAP) { m_snapLeftArmed = true; }
-    if (db < AppC::SNAP_GAP && m_snapBottomArmed){ r->top = wa.bottom - h; r->bottom = wa.bottom; m_snapBottomArmed = false; }
-    if (db > AppC::SNAP_GAP) { m_snapBottomArmed = true; }
-    if (dt < AppC::SNAP_GAP && m_snapTopArmed)   { r->bottom = wa.top + h; r->top = wa.top; m_snapTopArmed = false; }
-    if (dt > AppC::SNAP_GAP) { m_snapTopArmed = true; }
+    // Direction-aware snap: only snap edges we're moving TOWARD
+    // Use larger threshold on first drag from corner to avoid sticking
+    float gap = AppC::SNAP_GAP;
+    // Don't snap if window starts at the edge and user pulls away
+    if (dr < gap && m_snapRightArmed)  { r->left = wa.right - w; r->right = wa.right; m_snapRightArmed = false; }
+    if (dr > gap + 5.0f) { m_snapRightArmed = true; }
+    if (dl < gap && m_snapLeftArmed)   { r->right = wa.left + w; r->left = wa.left; m_snapLeftArmed = false; }
+    if (dl > gap + 5.0f) { m_snapLeftArmed = true; }
+    if (db < gap && m_snapBottomArmed) { r->top = wa.bottom - h; r->bottom = wa.bottom; m_snapBottomArmed = false; }
+    if (db > gap + 5.0f) { m_snapBottomArmed = true; }
+    if (dt < gap && m_snapTopArmed)    { r->bottom = wa.top + h; r->top = wa.top; m_snapTopArmed = false; }
+    if (dt > gap + 5.0f) { m_snapTopArmed = true; }
 }
 void App::onSizing(RECT* r) {
     int w = r->right - r->left, h = r->bottom - r->top;
@@ -981,6 +997,8 @@ void App::onCompositionResult(const std::wstring& s) {
     if (!s.empty()) m_editText += s;
     m_compositionText.clear();
     m_cursorBlink = 0;
+    // Sync EDIT text so caret position in tick() won't overwrite with stale data
+    editSetText(m_editText);
     positionEdit();
     requestRedraw();
 }
