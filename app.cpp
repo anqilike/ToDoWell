@@ -126,7 +126,7 @@ void App::destroy() {
 }
 void App::ensureEditCreated() {
     if (m_edit) return;
-    m_edit = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_TABSTOP | ES_LEFT | ES_AUTOHSCROLL,
+    m_edit = CreateWindowExW(0, L"EDIT", L"", WS_CHILD | WS_TABSTOP | ES_LEFT | ES_AUTOHSCROLL,
                              0, 0, 1, 1, m_hwnd, nullptr, GetModuleHandleW(nullptr), nullptr);
     if (m_edit) {
         g_editOldProc = (WNDPROC)SetWindowLongPtrW(m_edit, GWLP_WNDPROC, (LONG_PTR)EditSubproc);
@@ -227,12 +227,12 @@ void App::beginEdit(EditMode mode, int pi, int ti, const std::wstring& initial) 
     }
     ensureEditCreated();
     editSetText(initial);
-    if (m_edit) { ShowWindow(m_edit, SW_SHOW); SetFocus(m_edit); }
-    positionIME();
     positionEdit();
+    if (m_edit) { SetFocus(m_edit); }
+    positionIME();
     requestRedraw();
 }
-void App::endEdit(bool applyFocus) { if (m_edit && m_caretCreated) { DestroyCaret(); m_caretCreated = false; }
+void App::endEdit(bool applyFocus) { if (m_caretCreated) { DestroyCaret(); m_caretCreated = false; }
     m_reentering = true;
     m_editMode = ED_NONE; m_editPi = -1; m_editTi = -1;
     m_compositionText.clear();
@@ -256,19 +256,15 @@ void App::positionEdit() {
     }
     int x = toPx(cursorX);
     int y = toPx(cursorY);
-    float editW = m_editRectDip.right - m_editRectDip.left;
-    if (editW < 10.0f) editW = 10.0f;
-    int w = toPx(editW);
-    int h = toPx(AppC::ROW_H - 4.0f);
-    SetWindowPos(m_edit, nullptr, toPx(m_editRectDip.left), y - h, w, h, SWP_NOZORDER | SWP_NOACTIVATE);
-    // Create system caret once, only update position on subsequent calls
+    // 1x1 hidden proxy EDIT at caret position for IME only — D2D draws everything
+    SetWindowPos(m_edit, nullptr, x, y, 1, 1, SWP_NOZORDER | SWP_NOACTIVATE);
+    // Create system caret in main window for TSF IME positioning
     if (!m_caretCreated) {
-        CreateCaret(m_edit, nullptr, 1, h);
+        CreateCaret(m_hwnd, nullptr, 1, toPx(AppC::ROW_H));
         m_caretCreated = true;
     }
-    // Place caret near text baseline, not at top of EDIT
-    SetCaretPos(toPx(textW), h - 3);
-    ShowCaret(m_edit);
+    SetCaretPos(x, y);
+    ShowCaret(m_hwnd);
 }
 void App::cancelEdit() {
     if (m_addingProject) { m_addingProject = false; }
