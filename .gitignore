@@ -1,0 +1,26 @@
+﻿# Build artifacts
+*.obj
+*.res
+*.exe
+*.pdb
+*.ilk
+
+# IDE
+.vs/
+*.sln
+*.vcxproj
+*.vcxproj.filters
+*.vcxproj.user
+*.user
+
+# Data (user-specific)
+todos.json
+config.json
+
+# Python backup
+前期python版本/
+
+*.ps1
+*.rar
+*.docx
+git rm --cached analyze.ps1 clickclose.ps1 grid.ps1 resizetest.ps1 screenshot.ps1 track.ps1 gen_doc.py ToDoWell.rar ToDoWell_2.0.0_doc.docx 2>>
