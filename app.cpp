@@ -1,4 +1,4 @@
-#define WIN32_LEAN_AND_MEAN
+﻿#define WIN32_LEAN_AND_MEAN
 #define NOMINMAX
 #include <windows.h>
 #include <windowsx.h>
@@ -391,7 +391,7 @@ void App::rebuildHits() {
         for (size_t ti = 0; ti < proj.todos.size(); ++ti) {
             bool fading = false;
             for (auto& f : m_fades) if (f.pi == (int)pi && f.ti == (int)ti) { fading = true; break; }
-            if (fading) { continue; }
+            if (fading) { y += AppC::ROW_H; continue; }
             float rowTop = y;
             float cx = contentLeft + AppC::CARD_INNER + AppC::CIRCLE_R + 2.0f;
             float cy = rowTop + AppC::ROW_H / 2.0f;
@@ -480,10 +480,15 @@ void App::render() {
 
     for (size_t pi = 0; pi < m_projects.size(); ++pi) {
         auto& proj = m_projects[pi];
-        float cardTop = y - scrollOff;
-        float cardBottom2 = cardTop;
+        // Card white background
+        float cardContentBot = y + AppC::CARD_TOP + AppC::BADGE_H + 6.0f
+                              + (float)proj.todos.size() * AppC::ROW_H
+                              + AppC::ROW_H + 4.0f + 6.0f;
+        float scrTop = cTop + y - scrollOff;
+        float scrBot = cTop + cardContentBot - scrollOff;
+        g.fillRoundedRect(D2D1::RectF(contentLeft, scrTop, contentLeft + contentW, scrBot), 8.0f, C::WHITE);
         float hy = y + AppC::CARD_TOP;
-        float screenHy = hy - scrollOff;
+        float screenHy = cTop + hy - scrollOff;
         float badgeX = contentLeft + AppC::CARD_INNER;
         std::wstring num = std::to_wstring((int)pi + 1);
         float tw = g.measureTextW(num, F_PROJ_NUM);
@@ -571,8 +576,7 @@ void App::render() {
             }
         }
         y += AppC::ROW_H + 4.0f + 6.0f + AppC::CARD_GAP;
-        cardBottom2 = cTop + y - scrollOff;
-        (void)cardTop; (void)cardBottom2;
+
     }
     m_contentH = std::max(m_contentH, y + AppC::CARD_GAP);
     if (m_addingProject) {
