@@ -226,7 +226,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
 
     int pw = CalcWindowW(), ph = CalcWindowH();
     HWND hwnd = CreateWindowExW(
-        WS_EX_APPWINDOW,
+        WS_EX_APPWINDOW | WS_EX_LAYERED,
         kClass, L"ToDoWell",
         WS_POPUP | WS_THICKFRAME | WS_CLIPCHILDREN | WS_VISIBLE,
         0, 0, pw, ph,
@@ -234,6 +234,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     if (!hwnd) return 0;
 
     SnapBottomRight(hwnd, pw, ph);
+    SetLayeredWindowAttributes(hwnd, 0, 255, LWA_ALPHA);
     ShowWindow(hwnd, nShow);
     UpdateWindow(hwnd);
 

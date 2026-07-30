@@ -42,20 +42,24 @@ void App::positionIME() {
     if (m_editMode != ED_PREF_PREFIX) {
         py += AppC::TITLE_H - m_scroll;
     }
-    POINT pt = { toPx(px), toPx(py + AppC::ROW_H) };
-    ClientToScreen(m_hwnd, &pt);
-    m_imePos = pt;
-    HWND imeTarget = (m_edit && IsWindowVisible(m_edit)) ? m_edit : m_hwnd;
+    // Composition window at cursor baseline
+    POINT ptComp = { toPx(px), toPx(py) };
+    ClientToScreen(m_hwnd, &ptComp);
+    // Candidate window just below the text row
+    POINT ptCand = { toPx(px), toPx(py + 4.0f) };
+    ClientToScreen(m_hwnd, &ptCand);
+    m_imePos = ptCand;
+    HWND imeTarget = (m_edit && m_editMode != ED_NONE) ? m_edit : m_hwnd;
     HIMC himc = ImmGetContext(imeTarget);
     if (himc) {
         COMPOSITIONFORM cf = {};
         cf.dwStyle = CFS_POINT;
-        cf.ptCurrentPos = pt;
+        cf.ptCurrentPos = ptComp;
         ImmSetCompositionWindow(himc, &cf);
         CANDIDATEFORM cdf = {};
         cdf.dwIndex = 0;
         cdf.dwStyle = CFS_CANDIDATEPOS;
-        cdf.ptCurrentPos = pt;
+        cdf.ptCurrentPos = ptCand;
         cdf.rcArea = {0, 0, 0, 0};
         ImmSetCandidateWindow(himc, &cdf);
         ImmReleaseContext(imeTarget, himc);
@@ -262,7 +266,8 @@ void App::positionEdit() {
         CreateCaret(m_edit, nullptr, 1, h);
         m_caretCreated = true;
     }
-    SetCaretPos(toPx(textW), 0);
+    // Place caret near text baseline, not at top of EDIT
+    SetCaretPos(toPx(textW), h - 3);
     ShowCaret(m_edit);
 }
 void App::cancelEdit() {
@@ -816,10 +821,6 @@ void App::tick(float dt) {
                     SetWindowPos(m_hwnd, nullptr, m_snapToX, m_snapToY, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
                     m_snappedToTarget = true;
                 }
-                if (m_snapAnim < 0.02f) {
-                    LONG_PTR ex = GetWindowLongPtrW(m_hwnd, GWL_EXSTYLE);
-                    if (!(ex & WS_EX_LAYERED)) SetWindowLongPtrW(m_hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
-                }
                 float alphaF = (t < 0.5f) ? 1.0f - (t / 0.5f) * (t / 0.5f) : ((t - 0.5f) / 0.5f) * ((t - 0.5f) / 0.5f);
                 SetLayeredWindowAttributes(m_hwnd, 0, (BYTE)(255.0f * alphaF), LWA_ALPHA);
                 if (t >= 0.5f) {
@@ -879,11 +880,7 @@ void App::tick(float dt) {
         }
     }
     if (m_closing) {
-        if (m_closeAnim == 0.0f) {
-            LONG_PTR ex = GetWindowLongPtrW(m_hwnd, GWL_EXSTYLE);
-            SetWindowLongPtrW(m_hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
-        }
-        float fadeT = m_closeAnim < 0.25f ? 0.0f : (m_closeAnim - 0.25f) / 0.75f;
+        float fadeT = m_closeAnim < 0.15f ? 0.0f : (m_closeAnim - 0.15f) / 0.85f;
         BYTE alpha = (BYTE)(255.0f * (1.0f - fadeT * fadeT * fadeT * fadeT));
         SetLayeredWindowAttributes(m_hwnd, 0, alpha, LWA_ALPHA);
         m_closeAnim += dt / 0.45f;
