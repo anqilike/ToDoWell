@@ -53,7 +53,8 @@ void App::positionIME() {
         cf.ptCurrentPos = pt;
         ImmSetCompositionWindow(himc, &cf);
         CANDIDATEFORM cdf = {};
-        cdf.dwStyle = CFS_EXCLUDE;
+        cdf.dwIndex = 0;
+        cdf.dwStyle = CFS_CANDIDATEPOS;
         cdf.ptCurrentPos = pt;
         cdf.rcArea = {0, 0, 0, 0};
         ImmSetCandidateWindow(himc, &cdf);
@@ -963,18 +964,7 @@ void App::onKeyDown(int vk) {
         cancelEdit();
         return;
     }
-    if (vk == VK_BACK) {
-        if (!m_editText.empty()) m_editText.pop_back();
-        m_cursorBlink = 0;
-        requestRedraw();
-        return;
-    }
-    if (vk == VK_DELETE) {
-        m_editText.clear();
-        m_cursorBlink = 0;
-        requestRedraw();
-        return;
-    }
+    // Backspace/delete handled by EDIT control
 }
 void App::onCompositionUpdate(const std::wstring& s) {
     if (m_editMode == ED_NONE) return;
@@ -984,10 +974,9 @@ void App::onCompositionUpdate(const std::wstring& s) {
 }
 void App::onCompositionResult(const std::wstring& s) {
     if (m_editMode == ED_NONE) return;
-    (void)s;
+    if (!s.empty()) m_editText += s;
     m_compositionText.clear();
     m_cursorBlink = 0;
-    if (m_edit) m_editText = editGetText();
     positionEdit();
     requestRedraw();
 }
