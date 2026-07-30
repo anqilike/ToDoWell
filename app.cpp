@@ -250,7 +250,7 @@ void App::positionEdit() {
     std::wstring fullText = m_editText + m_compositionText;
     float textW = g_gfx.measureTextW(fullText, fid);
     float cursorX = m_editRectDip.left + textW;
-    float cursorY = m_editRectDip.bottom;
+    float cursorY = m_editRectDip.top + AppC::ROW_H * 0.5f;
     if (m_editMode != ED_PREF_PREFIX) {
         cursorY += AppC::TITLE_H - m_scroll;
     }
@@ -523,7 +523,7 @@ void App::render() {
         }
         float delX = contentLeft + contentW - AppC::CARD_INNER - delW;
         D2D1_COLOR_F delCol = lerpColor(C::DEL_BTN, C::DEL_HOVER, m_projDelT);
-        g.drawText(L"\u2212", D2D1::RectF(delX, screenHy, delX + delW, screenHy + AppC::BADGE_H), F_SYM_TITLE, delCol,
+        g.drawText(L"\u2715", D2D1::RectF(delX, screenHy, delX + delW, screenHy + AppC::BADGE_H), F_SYM_TITLE, delCol,
                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         y = hy + AppC::BADGE_H + 6.0f;
 
