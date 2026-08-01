@@ -477,7 +477,7 @@ void App::rebuildHits() {
         if (m_editMode == ED_ADD_PROJECT) {
             m_editRectDip = D2D1::RectF(nameX2, hy2 - 2, nameRight2, hy2 + AppC::BADGE_H + 2);
         }
-        y = hy2 + AppC::BADGE_H + 12.0f;
+        y = hy2 + AppC::BADGE_H + 4.0f;
         m_contentH = std::max(m_contentH, y + AppC::CARD_GAP);
         (void)cardTop2;
     }
@@ -632,7 +632,7 @@ void App::render() {
     if (m_addingProject) {
         float hy = y + AppC::CARD_TOP;
         float screenTop = cTop + y - scrollOff;
-        float screenBot = screenTop + AppC::BADGE_H + 22.0f; // taller input card
+        float screenBot = screenTop + AppC::BADGE_H + 14.0f;
         D2D1_RECT_F cardRc = D2D1::RectF(contentLeft, screenTop, contentLeft + contentW, screenBot);
         g.fillRoundedRect(cardRc, 8.0f, C::WHITE);
         g.fillRect(D2D1::RectF(contentLeft, screenTop, contentLeft + 4.0f, screenBot), C::ACCENT);
@@ -645,12 +645,12 @@ void App::render() {
             float editW = std::max(g.measureTextW(dtext, F_PROJ_NAME) + 8.0f, 60.0f);
             // Keep the input text vertically centered in the card, exactly
             // where the "新项目名称" placeholder is drawn.
-            g.drawLine(ex, screenTop + 28, ex + editW, screenTop + 28, C::ACCENT, 1.5f);
+            g.drawLine(ex, screenTop + 30, ex + editW, screenTop + 30, C::ACCENT, 1.5f);
             g.drawText(dtext, D2D1::RectF(ex, screenTop, ex + ew, screenBot), F_PROJ_NAME, C::TEXT);
             float tw2 = g.measureTextW(m_editText, F_PROJ_NAME);
             float cw = g.measureTextW(m_compositionText, F_PROJ_NAME);
             bool showCursor = ((int)(m_cursorBlink * 2) % 2) == 0;
-            if (showCursor) g.drawLine(ex + tw2 + cw + 1, screenTop + 12, ex + tw2 + cw + 1, screenTop + 27, C::ACCENT, 1.5f);
+            if (showCursor) g.drawLine(ex + tw2 + cw + 1, screenTop + 8, ex + tw2 + cw + 1, screenTop + 29, C::ACCENT, 1.5f);
         }
     }
     g.rt->PopAxisAlignedClip();
