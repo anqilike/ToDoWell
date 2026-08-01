@@ -640,16 +640,17 @@ void App::render() {
             g.drawText(L"\u65b0\u9879\u76ee\u540d\u79f0", D2D1::RectF(contentLeft + AppC::CARD_INNER + 8.0f, screenTop, contentLeft + contentW - AppC::CARD_INNER, screenBot), F_PROJ_NAME, C::MUTED);
         } else {
             float ex = contentLeft + AppC::CARD_INNER + 8.0f;
-            float ey = screenTop;
             float ew = contentW - AppC::CARD_INNER * 2 - 8.0f;
             std::wstring dtext = m_editText + m_compositionText;
             float editW = std::max(g.measureTextW(dtext, F_PROJ_NAME) + 8.0f, 60.0f);
-            g.drawLine(ex, ey + AppC::BADGE_H - 1, ex + editW, ey + AppC::BADGE_H - 1, C::ACCENT, 1.5f);
-            g.drawText(dtext, D2D1::RectF(ex, ey, ex + ew, ey + AppC::BADGE_H), F_PROJ_NAME, C::TEXT);
+            // Keep the input text vertically centered in the card, exactly
+            // where the "新项目名称" placeholder is drawn.
+            g.drawLine(ex, screenTop + 24, ex + editW, screenTop + 24, C::ACCENT, 1.5f);
+            g.drawText(dtext, D2D1::RectF(ex, screenTop, ex + ew, screenBot), F_PROJ_NAME, C::TEXT);
             float tw2 = g.measureTextW(m_editText, F_PROJ_NAME);
             float cw = g.measureTextW(m_compositionText, F_PROJ_NAME);
             bool showCursor = ((int)(m_cursorBlink * 2) % 2) == 0;
-            if (showCursor) g.drawLine(ex + tw2 + cw + 1, ey + 2, ex + tw2 + cw + 1, ey + AppC::BADGE_H - 2, C::ACCENT, 1.5f);
+            if (showCursor) g.drawLine(ex + tw2 + cw + 1, screenTop + 8, ex + tw2 + cw + 1, screenTop + 23, C::ACCENT, 1.5f);
         }
     }
     g.rt->PopAxisAlignedClip();
