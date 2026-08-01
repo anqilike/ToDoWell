@@ -660,16 +660,37 @@ void App::render() {
 
     // bottom bar
     g.fillRect(D2D1::RectF(0, H - AppC::BOT_H, W, H), C::PAGE);
+    // Rotate each icon around its own glyph center (not the button rect
+    // center): measure the actual text bounding box.
+    auto glyphCenter = [&](const wchar_t* s, D2D1_RECT_F rc) -> D2D1_POINT_2F {
+        D2D1_POINT_2F c = { rc.left + (rc.right - rc.left) * 0.5f, rc.top + (rc.bottom - rc.top) * 0.5f };
+        IDWriteTextFormat* f = g.font(F_SYM_BOTTOM);
+        f->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
+        f->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        IDWriteTextLayout* lay = nullptr;
+        if (SUCCEEDED(g.dw->CreateTextLayout(s, (UINT32)wcslen(s), f,
+                                             rc.right - rc.left, rc.bottom - rc.top, &lay)) && lay) {
+            DWRITE_TEXT_METRICS tm;
+            if (SUCCEEDED(lay->GetMetrics(&tm))) {
+                c.x = rc.left + tm.left + tm.width * 0.5f;
+                c.y = rc.top + tm.top + tm.height * 0.5f;
+            }
+            lay->Release();
+        }
+        return c;
+    };
     D2D1_COLOR_F addCol = lerpColor(C::TEXT, C::ACCENT, m_addT);
-    D2D1_POINT_2F addC = D2D1::Point2F(26.0f, H - AppC::BOT_H / 2.0f);
+    D2D1_RECT_F addRc = D2D1::RectF(8, H - AppC::BOT_H, 44, H);
+    D2D1_POINT_2F addC = glyphCenter(L"+", addRc);
     g.rt->SetTransform(D2D1::Matrix3x2F::Rotation(m_addSpin * 360.0f, addC));
-    g.drawText(L"+", D2D1::RectF(8, H - AppC::BOT_H, 44, H), F_SYM_BOTTOM, addCol,
+    g.drawText(L"+", addRc, F_SYM_BOTTOM, addCol,
                DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     g.rt->SetTransform(D2D1::Matrix3x2F::Identity());
     D2D1_COLOR_F gearCol = lerpColor(C::TEXT, C::ACCENT, m_gearT);
-    D2D1_POINT_2F gearC = D2D1::Point2F(W - 26.0f, H - AppC::BOT_H / 2.0f);
+    D2D1_RECT_F gearRc = D2D1::RectF(W - 44, H - AppC::BOT_H, W - 8, H);
+    D2D1_POINT_2F gearC = glyphCenter(L"\u2699", gearRc);
     g.rt->SetTransform(D2D1::Matrix3x2F::Rotation(m_gearSpin * 360.0f, gearC));
-    g.drawText(L"\u2699", D2D1::RectF(W - 44, H - AppC::BOT_H, W - 8, H), F_SYM_BOTTOM, gearCol,
+    g.drawText(L"\u2699", gearRc, F_SYM_BOTTOM, gearCol,
                DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     g.rt->SetTransform(D2D1::Matrix3x2F::Identity());
     // overlays
