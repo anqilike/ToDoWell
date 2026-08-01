@@ -49,8 +49,10 @@ void App::requestClose() {
 bool App::animating() const {
     if (m_closing) return true;
     if (m_snapping) return true;
-    if (m_overlayAlpha > 0.01f && (m_settings || m_about)) return true;
-    if (m_aboutAlpha > 0.01f && m_about) return true;
+    // Keep repainting while the overlay shade fades in OR out, so the main
+    // page never gets stuck dimmed after closing settings/about.
+    if (m_overlayAlpha > 0.01f) return true;
+    if (m_aboutAlpha > 0.01f) return true;
     if (!m_fades.empty()) return true;
     return false;
 }
