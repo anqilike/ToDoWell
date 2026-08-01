@@ -758,7 +758,7 @@ void App::render() {
         D2D1_COLOR_F aboutCol = D2D1::ColorF(C::ACCENT.r, C::ACCENT.g, C::ACCENT.b, oa);
         g.drawText(L"\u5173\u4e8e ToDoWell", D2D1::RectF(dlgX + 16, ay, dlgX + dlgW - 16, ay + 18), F_HINT, aboutCol);
         g.rt->PopAxisAlignedClip();
-        g.drawText(L"\u7248\u672c 2.0.0", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.0", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(L"\u7248\u6743\u6240\u6709@\u5929\u624d\u76845014", D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
         m_setContentH = (ay + 20.0f + sy) - dlgY + 10.0f;
@@ -797,7 +797,7 @@ void App::render() {
         }
         g.rt->PopAxisAlignedClip();
         m_aboutContentH = (ty - sy) - dlgY + 10.0f;
-        g.drawText(L"\u7248\u672c 2.0.0", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.0", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(L"\u7248\u6743\u6240\u6709@\u5929\u624d\u76845014", D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
     }
 
