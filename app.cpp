@@ -53,6 +53,8 @@ bool App::animating() const {
     // page never gets stuck dimmed after closing settings/about.
     if (m_overlayAlpha > 0.01f) return true;
     if (m_aboutAlpha > 0.01f) return true;
+    if ((m_addSpin > 0.001f && m_addSpin < 1.0f) ||
+        (m_gearSpin > 0.001f && m_gearSpin < 1.0f)) return true;
     if (!m_fades.empty()) return true;
     return false;
 }
@@ -659,11 +661,17 @@ void App::render() {
     // bottom bar
     g.fillRect(D2D1::RectF(0, H - AppC::BOT_H, W, H), C::PAGE);
     D2D1_COLOR_F addCol = lerpColor(C::TEXT, C::ACCENT, m_addT);
+    D2D1_POINT_2F addC = D2D1::Point2F(26.0f, H - AppC::BOT_H / 2.0f);
+    g.rt->SetTransform(D2D1::Matrix3x2F::Rotation(m_addSpin * 360.0f, addC));
     g.drawText(L"+", D2D1::RectF(8, H - AppC::BOT_H, 44, H), F_SYM_BOTTOM, addCol,
                DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    g.rt->SetTransform(D2D1::Matrix3x2F::Identity());
     D2D1_COLOR_F gearCol = lerpColor(C::TEXT, C::ACCENT, m_gearT);
+    D2D1_POINT_2F gearC = D2D1::Point2F(W - 26.0f, H - AppC::BOT_H / 2.0f);
+    g.rt->SetTransform(D2D1::Matrix3x2F::Rotation(m_gearSpin * 360.0f, gearC));
     g.drawText(L"\u2699", D2D1::RectF(W - 44, H - AppC::BOT_H, W - 8, H), F_SYM_BOTTOM, gearCol,
                DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    g.rt->SetTransform(D2D1::Matrix3x2F::Identity());
     // overlays
     if (m_overlayAlpha > 0.01f || m_settings || m_about) {
         float oa = m_overlayAlpha;
@@ -862,6 +870,11 @@ void App::tick(float dt) {
     approach(m_closeT, m_hoverClose ? 1.0f : 0.0f, dt, 18.0f);
     approach(m_addT, m_hoverAdd ? 1.0f : 0.0f, dt, 18.0f);
     approach(m_gearT, m_hoverGear ? 1.0f : 0.0f, dt, 18.0f);
+    // Icon spin: one full turn on hover, spins back when the mouse leaves.
+    if (m_hoverAdd && m_addSpin < 1.0f) m_addSpin = std::min(1.0f, m_addSpin + dt / 0.35f);
+    else if (!m_hoverAdd && m_addSpin > 0.0f) m_addSpin = std::max(0.0f, m_addSpin - dt / 0.30f);
+    if (m_hoverGear && m_gearSpin < 1.0f) m_gearSpin = std::min(1.0f, m_gearSpin + dt / 0.35f);
+    else if (!m_hoverGear && m_gearSpin > 0.0f) m_gearSpin = std::max(0.0f, m_gearSpin - dt / 0.30f);
     approach(m_projDelT, m_hoverProjDel >= 0 ? 1.0f : 0.0f, dt, 18.0f);
     approach(m_circT, m_hovCircPi >= 0 ? 1.0f : 0.0f, dt, 20.0f);
     approach(m_checkT, m_hoverCheckbox ? 1.0f : 0.0f, dt, 18.0f);

@@ -123,8 +123,10 @@ private:
     // Hover state (for color lerp).
     int m_hoverSnap = 0; float m_snapT = 0;
     int m_hoverClose = 0; float m_closeT = 0;
-    int m_hoverAdd = 0; float m_addT = 0;
-    int m_hoverGear = 0; float m_gearT = 0;
+int m_hoverAdd = 0; float m_addT = 0;
+int m_hoverGear = 0; float m_gearT = 0;
+float m_addSpin = 0;   // "+" icon spin progress (0..1 = one full turn)
+float m_gearSpin = 0;  // gear icon spin progress (0..1 = one full turn)
     int m_hoverProjDel = -1; float m_projDelT = 0;
     // circle hover: store pi,ti
     int m_hovCircPi = -1, m_hovCircTi = -2; float m_circT = 0; // ti=-2 means new-todo circle
