@@ -60,14 +60,11 @@ public:
     void onEditReturn();
     void onEditEscape();
     void onEditKillFocus();
-    void positionIME();
-    void positionIMELight(); // update screen coords + ImmSet windows, no rebuildHits
     void onCompositionUpdate(const std::wstring& s);
     void onCompositionResult(const std::wstring& s);
     void onCompositionEnd();
     HWND hwnd() const { return m_hwnd; }
     HWND editHwnd() const { return m_edit; }
-    POINT imePos() const { return m_imePos; }
 
     float toDip(int px) const;
     int toPx(float dip) const;
@@ -80,7 +77,11 @@ private:
     HWND m_edit = nullptr;
     WNDPROC m_editOldProc = nullptr;
     bool m_reentering = false; // suppress killfocus cancel during re-focus
-    bool m_caretCreated = false; // track caret lifecycle
+    int m_editPosX = -1, m_editPosY = -1, m_editPosW = -1, m_editPosH = -1; // last SetWindowPos args
+    float m_imeHideTimer = 0; // throttle for hiding the IME composition window
+    float m_pollImeTimer = 0; // throttle for polling IME composition/candidates
+    std::vector<std::wstring> m_cands; // current IME candidate list (app-rendered)
+    int m_candSel = -1;                // selected candidate index
 
     std::vector<Project> m_projects;
     Config m_cfg;
@@ -135,9 +136,9 @@ private:
     std::vector<FadeTodo> m_fades;
     std::vector<Hit> m_hits; // content-space rects (y relative to content top, pre-scroll)
     D2D1_RECT_F m_editRectDip = {};
-    POINT m_imePos = {}; // screen-space DIP rect where EDIT should sit
 
     void rebuildHits();
+    void pollIme();
     void beginEdit(EditMode mode, int pi, int ti, const std::wstring& initial);
     void endEdit(bool applyFocus);
     void ensureEditCreated();

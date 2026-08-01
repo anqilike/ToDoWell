@@ -29,43 +29,6 @@ void App::approach(float& cur, float target, float dt, float speed) {
 }
 void App::requestRedraw() { if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE); }
 
-void App::positionIME() {
-    if (m_editMode == ED_NONE) return;
-    if (m_editRectDip.left == 0 && m_editRectDip.right == 0) return;
-    FontId fid = F_TODO;
-    if (m_editMode == ED_EDIT_PROJECT || m_editMode == ED_ADD_PROJECT) fid = F_PROJ_NAME;
-    else if (m_editMode == ED_PREF_PREFIX) fid = F_SETTINGS;
-    std::wstring fullText = m_editText + m_compositionText;
-    float textW = g_gfx.measureTextW(fullText, fid);
-    float px = m_editRectDip.left + textW;
-    float py = m_editRectDip.bottom;
-    if (m_editMode != ED_PREF_PREFIX) {
-        py += AppC::TITLE_H - m_scroll;
-    }
-    // Composition window at cursor baseline
-    POINT ptComp = { toPx(px), toPx(py) };
-    ClientToScreen(m_hwnd, &ptComp);
-    // Candidate window just below the text row
-    POINT ptCand = { toPx(px), toPx(py + 4.0f) };
-    ClientToScreen(m_hwnd, &ptCand);
-    m_imePos = ptCand;
-    HWND imeTarget = (m_edit && m_editMode != ED_NONE) ? m_edit : m_hwnd;
-    HIMC himc = ImmGetContext(imeTarget);
-    if (himc) {
-        COMPOSITIONFORM cf = {};
-        cf.dwStyle = CFS_POINT;
-        cf.ptCurrentPos = ptComp;
-        ImmSetCompositionWindow(himc, &cf);
-        CANDIDATEFORM cdf = {};
-        cdf.dwIndex = 0;
-        cdf.dwStyle = CFS_CANDIDATEPOS;
-        cdf.ptCurrentPos = ptCand;
-        cdf.rcArea = {0, 0, 0, 0};
-        ImmSetCandidateWindow(himc, &cdf);
-        ImmReleaseContext(imeTarget, himc);
-    }
-}
-
 void App::clampScroll() {
     float mx = m_contentH - (m_h - AppC::TITLE_H - AppC::BOT_H);
     if (mx < 0) mx = 0;
@@ -132,7 +95,26 @@ void App::ensureEditCreated() {
         g_editOldProc = (WNDPROC)SetWindowLongPtrW(m_edit, GWLP_WNDPROC, (LONG_PTR)EditSubproc);
         m_editOldProc = g_editOldProc;
         SendMessageW(m_edit, WM_SETFONT, (WPARAM)g_fontTodo, TRUE);
+        // Clip the EDIT's own drawing to 1 pixel: the IME/EDIT may paint the
+        // composition into its DC (bypassing WM_PAINT), which would overlap
+        // the D2D text. The window rect stays full-size for TSF geometry.
+        HRGN rgn = CreateRectRgn(0, 0, 1, 1);
+        SetWindowRgn(m_edit, rgn, TRUE);
     }
+}
+// The IME draws the in-progress pinyin in its own floating window
+// ("MSCTFIME Composition"). The app renders the composition itself via D2D,
+// so this system window is hidden to keep the input visually integrated.
+static void HideImeCompositionWindows() {
+    EnumWindows([](HWND h, LPARAM) -> BOOL {
+        wchar_t cls[64];
+        if (GetClassNameW(h, cls, 64) > 0 && wcscmp(cls, L"MSCTFIME Composition") == 0) {
+            DWORD pid = 0;
+            GetWindowThreadProcessId(h, &pid);
+            if (pid == GetCurrentProcessId()) ShowWindow(h, SW_HIDE);
+        }
+        return TRUE;
+    }, 0);
 }
 LRESULT CALLBACK EditSubproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_KEYDOWN) {
@@ -144,19 +126,27 @@ LRESULT CALLBACK EditSubproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         return DLGC_WANTALLKEYS;
     } else if (msg == WM_KILLFOCUS) {
         if (g_app) g_app->onEditKillFocus();
+    } else if (msg == WM_SETFOCUS) {
+        LRESULT res = CallWindowProcW(g_editOldProc, h, msg, wp, lp);
+        // The EDIT paints nothing; D2D draws the visible caret.
+        HideCaret(h);
+        return res;
     } else if (msg == WM_PAINT) {
         PAINTSTRUCT ps; BeginPaint(h, &ps); EndPaint(h, &ps);
         return 0;
     } else if (msg == WM_ERASEBKGND) {
         return 1;
+    } else if (msg == WM_PRINTCLIENT) {
+        return 0;
     } else if (msg == WM_IME_SETCONTEXT) {
         LRESULT res = CallWindowProcW(g_editOldProc, h, msg, wp, lp);
-        if (wp && g_app) g_app->positionIME();
+        HideImeCompositionWindows();
         return res;
     } else if (msg == WM_IME_STARTCOMPOSITION) {
-        if (g_app) g_app->positionIME();
+        HideImeCompositionWindows();
         return CallWindowProcW(g_editOldProc, h, msg, wp, lp);
     } else if (msg == WM_IME_COMPOSITION) {
+        HideImeCompositionWindows();
         if (g_app && g_app->isEditing()) {
             HIMC himc = ImmGetContext(h);
             if (himc) {
@@ -181,17 +171,12 @@ LRESULT CALLBACK EditSubproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                 }
                 ImmReleaseContext(h, himc);
             }
-            g_app->positionIME();
         }
         return CallWindowProcW(g_editOldProc, h, msg, wp, lp);
     } else if (msg == WM_IME_ENDCOMPOSITION) {
         if (g_app) g_app->onCompositionEnd();
         return CallWindowProcW(g_editOldProc, h, msg, wp, lp);
-    } else if (msg == WM_IME_CHAR) {
-        return CallWindowProcW(g_editOldProc, h, msg, wp, lp);
     } else if (msg == WM_IME_NOTIFY) {
-        if (wp == IMN_OPENCANDIDATE || wp == IMN_CHANGECANDIDATE)
-            if (g_app) g_app->positionIME();
         return CallWindowProcW(g_editOldProc, h, msg, wp, lp);
     }
     return CallWindowProcW(g_editOldProc, h, msg, wp, lp);
@@ -207,7 +192,7 @@ void App::editSetText(const std::wstring& s) {
     if (!m_edit) return;
     SetWindowTextW(m_edit, s.c_str());
     int len = (int)s.size();
-    if (len > 0) SendMessageW(m_edit, EM_SETSEL, 0, (LPARAM)(-1));
+    SendMessageW(m_edit, EM_SETSEL, len, len); // caret at end, no selection
 }
 void App::beginEdit(EditMode mode, int pi, int ti, const std::wstring& initial) {
     m_editMode = mode; m_editPi = pi; m_editTi = ti;
@@ -221,50 +206,101 @@ void App::beginEdit(EditMode mode, int pi, int ti, const std::wstring& initial) 
         float cy = dlgY + 14.0f + sy, cb = 18.0f;
         float ly = cy + cb + 8.0f;
         float fy = ly + 18.0f;
-        m_editRectDip = D2D1::RectF(dlgX + 22, fy + 3, dlgX + dlgW - 22, fy + 23);
+        m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
     } else {
         rebuildHits();
     }
     ensureEditCreated();
     editSetText(initial);
+    if (m_edit) {
+        HFONT f = (mode == ED_EDIT_PROJECT || mode == ED_ADD_PROJECT) ? g_fontProj : g_fontTodo;
+        SendMessageW(m_edit, WM_SETFONT, (WPARAM)f, TRUE);
+    }
     positionEdit();
     if (m_edit) { SetFocus(m_edit); }
-    positionIME();
     requestRedraw();
 }
-void App::endEdit(bool applyFocus) { if (m_caretCreated) { DestroyCaret(); m_caretCreated = false; }
+void App::endEdit(bool applyFocus) {
     m_reentering = true;
     m_editMode = ED_NONE; m_editPi = -1; m_editTi = -1;
     m_compositionText.clear();
+    m_cands.clear();
+    m_candSel = -1;
     m_reentering = false;
     (void)applyFocus;
-    if (m_edit) ShowWindow(m_edit, SW_HIDE);
+    if (m_edit) {
+        ShowWindow(m_edit, SW_HIDE);
+        m_editPosX = m_editPosY = m_editPosW = m_editPosH = -1;
+    }
     requestRedraw();
 }
 void App::positionEdit() {
     if (!m_edit || m_editMode == ED_NONE) return;
     if (m_editRectDip.left == 0 && m_editRectDip.right == 0) return;
-    FontId fid = F_TODO;
-    if (m_editMode == ED_EDIT_PROJECT || m_editMode == ED_ADD_PROJECT) fid = F_PROJ_NAME;
-    else if (m_editMode == ED_PREF_PREFIX) fid = F_SETTINGS;
-    std::wstring fullText = m_editText + m_compositionText;
-    float textW = g_gfx.measureTextW(fullText, fid);
-    float cursorX = m_editRectDip.left + textW;
-    float cursorY = m_editRectDip.top + AppC::ROW_H * 0.5f;
+    float editTop = m_editRectDip.top;
     if (m_editMode != ED_PREF_PREFIX) {
-        cursorY += AppC::TITLE_H - m_scroll;
+        editTop += AppC::TITLE_H - m_scroll;
     }
-    int x = toPx(cursorX);
-    int y = toPx(cursorY);
-    // 1x1 hidden proxy EDIT at caret position for IME only — D2D draws everything
-    SetWindowPos(m_edit, nullptr, x, y, 1, 1, SWP_NOZORDER | SWP_NOACTIVATE);
-    // Create system caret in main window for TSF IME positioning
-    if (!m_caretCreated) {
-        CreateCaret(m_hwnd, nullptr, 1, toPx(AppC::ROW_H));
-        m_caretCreated = true;
+    // Real, visible input control aligned with the row: TSF/IME positions the
+    // composition/candidate UI natively at the caret inside this control, and
+    // the control paints its own text (styled to match the app).
+    float editW = std::max(40.0f, m_editRectDip.right - m_editRectDip.left);
+    int ex = toPx(m_editRectDip.left), ey = toPx(editTop);
+    int ew = toPx(editW), eh = toPx(AppC::ROW_H);
+    // Avoid repositioning every tick (1ms timer): a SetWindowPos storm disturbs
+    // the IME's caret-geometry queries. Only move when something changed.
+    if (ex != m_editPosX || ey != m_editPosY || ew != m_editPosW || eh != m_editPosH) {
+        SetWindowPos(m_edit, nullptr, ex, ey, ew, eh, SWP_NOZORDER | SWP_NOACTIVATE);
+        m_editPosX = ex; m_editPosY = ey; m_editPosW = ew; m_editPosH = eh;
     }
-    SetCaretPos(x, y);
-    HideCaret(m_hwnd);
+    ShowWindow(m_edit, SW_SHOWNOACTIVATE);
+    HideCaret(m_edit); // D2D draws the visible caret
+}
+// The system IME (Microsoft Pinyin compatibility mode) draws its composition
+// and candidate list in its own floating window. That window is hidden, so
+// this polls the IME state and the app renders the pinyin and candidates
+// itself (fully integrated with the UI).
+void App::pollIme() {
+    if (!m_edit || m_editMode == ED_NONE) return;
+    HIMC himc = ImmGetContext(m_edit);
+    if (!himc) return;
+
+    std::wstring comp;
+    LONG len = ImmGetCompositionStringW(himc, GCS_COMPSTR, nullptr, 0);
+    if (len > 0) {
+        comp.resize(len / 2);
+        ImmGetCompositionStringW(himc, GCS_COMPSTR, &comp[0], len);
+        while (!comp.empty() && comp.back() == 0) comp.pop_back();
+    }
+    bool textChanged = (comp != m_compositionText);
+    m_compositionText = comp;
+    if (textChanged) m_cursorBlink = 0;
+
+    std::vector<std::wstring> cands;
+    int sel = -1;
+    if (!comp.empty()) {
+        DWORD count = ImmGetCandidateListCountW(himc, 0);
+        if (count > 0) {
+            DWORD sz = ImmGetCandidateListW(himc, 0, nullptr, 0);
+            if (sz > 0) {
+                std::vector<BYTE> buf(sz);
+                CANDIDATELIST* cl = (CANDIDATELIST*)buf.data();
+                if (ImmGetCandidateListW(himc, 0, cl, sz)) {
+                    sel = (int)cl->dwSelection;
+                    for (DWORD i = 0; i < cl->dwCount; ++i) {
+                        LPCWSTR s = (LPCWSTR)((BYTE*)cl + cl->dwOffset[i]);
+                        cands.push_back(s);
+                    }
+                }
+            }
+        }
+    }
+    bool candChanged = (cands != m_cands || sel != m_candSel);
+    m_cands = std::move(cands);
+    m_candSel = sel;
+
+    ImmReleaseContext(m_edit, himc);
+    if (textChanged || candChanged) requestRedraw();
 }
 void App::cancelEdit() {
     if (m_addingProject) { m_addingProject = false; }
@@ -695,7 +731,7 @@ void App::render() {
         g.rt->PopAxisAlignedClip();
         g.drawText(L"\u7248\u672c 2.0.0", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(L"\u7248\u6743\u6240\u6709@\u5929\u624d\u76845014", D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
-        if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 22, fy + 3, dlgX + dlgW - 22, fy + 23);
+        if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
         m_setContentH = (ay + 20.0f + sy) - dlgY + 10.0f;
     }
     if (m_about && m_aboutAlpha > 0.01f) {
@@ -736,10 +772,59 @@ void App::render() {
         g.drawText(L"\u7248\u6743\u6240\u6709@\u5929\u624d\u76845014", D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
     }
 
+    // App-rendered IME candidate list (the system IME window is hidden).
+    if (m_editMode != ED_NONE && !m_cands.empty()) {
+        FontId fid = F_TODO;
+        if (m_editMode == ED_EDIT_PROJECT || m_editMode == ED_ADD_PROJECT) fid = F_PROJ_NAME;
+        else if (m_editMode == ED_PREF_PREFIX) fid = F_SETTINGS;
+        float textW = g.measureTextW(m_editText + m_compositionText, fid);
+        float cx = m_editRectDip.left + textW;
+        float cy = m_editRectDip.top + AppC::ROW_H + 4.0f;
+        if (m_editMode != ED_PREF_PREFIX) cy += AppC::TITLE_H - m_scroll;
+
+        const float itemH = 20.0f, pad = 8.0f, numW = 20.0f;
+        float popW = 110.0f;
+        size_t shown = std::min(m_cands.size(), (size_t)9);
+        for (size_t i = 0; i < shown; ++i)
+            popW = std::max(popW, numW + g.measureTextW(m_cands[i], F_TODO) + 18.0f);
+        float popH = pad * 2 + itemH * (float)shown;
+        float x = std::max(4.0f, std::min(cx, W - popW - 4.0f));
+        float y = cy;
+        if (y + popH > H - 4.0f) y = std::max(4.0f, cy - popH - 8.0f);
+        D2D1_RECT_F prc = D2D1::RectF(x, y, x + popW, y + popH);
+        g.fillRoundedRect(prc, 6.0f, C::WHITE);
+        g.strokeRoundedRect(prc, 6.0f, C::SEP, 1.0f);
+        for (size_t i = 0; i < shown; ++i) {
+            float iy = y + pad + (float)i * itemH;
+            bool sel = (int)i == m_candSel;
+            if (sel) {
+                g.fillRoundedRect(D2D1::RectF(x + 3, iy - 2, x + popW - 3, iy + itemH - 2),
+                                  4.0f, C::ACCENT);
+            }
+            std::wstring num = std::to_wstring(i + 1);
+            g.drawText(num, D2D1::RectF(x + 8, iy, x + 8 + numW, iy + itemH), F_HINT,
+                       sel ? C::WHITE : C::MUTED,
+                       DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+            g.drawText(m_cands[i], D2D1::RectF(x + 8 + numW, iy, x + popW - 6, iy + itemH), F_TODO,
+                       sel ? C::WHITE : C::TEXT,
+                       DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        }
+    }
+
     if (g.rt->EndDraw() == D2DERR_RECREATE_TARGET) { g_gfx.recreate(m_hwnd); }
 }
 void App::tick(float dt) {
     if (m_editMode != ED_NONE) {
+        m_imeHideTimer += dt;
+        if (m_imeHideTimer >= 0.25f) {
+            m_imeHideTimer = 0;
+            HideImeCompositionWindows();
+        }
+        m_pollImeTimer += dt;
+        if (m_pollImeTimer >= 0.05f) {
+            m_pollImeTimer = 0;
+            pollIme();
+        }
         m_cursorBlink += dt;
         if (m_edit) {
             // Sync committed text from EDIT (skip during IME composition to avoid
@@ -1001,22 +1086,21 @@ void App::onCompositionUpdate(const std::wstring& s) {
 }
 void App::onCompositionResult(const std::wstring& s) {
     if (m_editMode == ED_NONE) return;
-    if (!s.empty()) m_editText += s;
+    (void)s;
+    // The EDIT control updates its own text natively (TSF/IME writes straight
+    // into the control), so the app only clears its composition copy.
     m_compositionText.clear();
     m_cursorBlink = 0;
-    // Sync EDIT text so caret position in tick() won't overwrite with stale data
-    editSetText(m_editText);
     positionEdit();
     requestRedraw();
 }
 void App::onCompositionEnd() {
     if (m_editMode == ED_NONE) return;
     m_compositionText.clear();
+    m_cands.clear();
+    m_candSel = -1;
     positionEdit();
     requestRedraw();
-}
-void App::positionIMELight() {
-    positionIME();
 }
 static bool inRect(float x, float y, const D2D1_RECT_F& r) {
     return x >= r.left && x <= r.right && y >= r.top && y <= r.bottom;
@@ -1087,7 +1171,7 @@ void App::onLButtonDown(float x, float y) {
         float fy = cy + cb + 8 + 18;
         if (inRect(x, y, D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26))) {
             m_cursorBlink = 0;
-            m_editRectDip = D2D1::RectF(dlgX + 22, fy + 3, dlgX + dlgW - 22, fy + 23);
+            m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
             requestRedraw();
             return;
         }
