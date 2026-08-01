@@ -650,7 +650,7 @@ void App::render() {
             float tw2 = g.measureTextW(m_editText, F_PROJ_NAME);
             float cw = g.measureTextW(m_compositionText, F_PROJ_NAME);
             bool showCursor = ((int)(m_cursorBlink * 2) % 2) == 0;
-            if (showCursor) g.drawLine(ex + tw2 + cw + 1, screenTop + 8, ex + tw2 + cw + 1, screenTop + 29, C::ACCENT, 1.5f);
+            if (showCursor) g.drawLine(ex + tw2 + cw + 1, screenTop + 2, ex + tw2 + cw + 1, screenTop + 29, C::ACCENT, 1.5f);
         }
     }
     g.rt->PopAxisAlignedClip();
