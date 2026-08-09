@@ -20,6 +20,9 @@ config.json
 # Python backup
 前期python版本/
 
+# 本地杂项
+fullscreen.png
+
 *.ps1
 *.rar
 *.docx

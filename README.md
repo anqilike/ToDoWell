@@ -4,6 +4,8 @@
 
 项目主页: <https://anqilike.github.io/ToDoWell/>
 
+下载: 最新版安装包见 [Releases](https://github.com/anqilike/ToDoWell/releases/latest)（单文件 exe，免安装）。
+
 ## 简介
 
 ToDoWell 由 Python 3.8 + tkinter 的 1.5.0 版本完全用 C++17 与 Direct2D 重写（当前版本 2.5.5）。窗口常驻桌面右下角，支持项目分类管理、待办任务增删改、中文输入法候选框跟随、多套归位/关闭动画、开机自启与 JSON 持久化。无任何第三方运行时依赖。
