@@ -56,6 +56,7 @@ bool App::animating() const {
     if ((m_addSpin > 0.001f && m_addSpin < 1.0f) ||
         (m_gearSpin > 0.001f && m_gearSpin < 1.0f) ||
         (m_projDelSpin > 0.001f && m_projDelSpin < 1.0f)) return true;
+    if (m_circT > 0.001f && m_circT < 1.0f) return true;
     if (!m_fades.empty()) return true;
     return false;
 }
@@ -688,7 +689,7 @@ void App::render() {
             float textRight = contentLeft + contentW - AppC::CARD_INNER;
             float sy = cTop + rowTop - scrollOff;
             bool hov = (m_hovCircPi == (int)pi && m_hovCircTi == (int)ti);
-            D2D1_COLOR_F cc = hov ? C::ACCENT : C::CIRCLE;
+            D2D1_COLOR_F cc = hov ? lerpColor(C::CIRCLE, C::ACCENT, m_circT) : C::CIRCLE;
             g.drawEllipse(cx, cy + (cTop - scrollOff), AppC::CIRCLE_R, AppC::CIRCLE_R, cc, 1.8f);
             if (!(m_editMode == ED_EDIT_TODO && m_editPi == (int)pi && m_editTi == (int)ti)) {
                 g.drawText(proj.todos[ti].text, D2D1::RectF(textX, sy, textRight, sy + AppC::ROW_H), F_TODO, C::TEXT,
@@ -1246,11 +1247,13 @@ void App::onMouseMove(float x, float y) {
             (void)pi;
         }
     }
+    bool overCircle = false;
     if (y >= AppC::TITLE_H && y <= H - AppC::BOT_H) {
         for (auto& h : m_hits) {
             if (contentY >= h.rc.top && contentY <= h.rc.bottom && x >= h.rc.left && x <= h.rc.right) {
                 if (h.type == H_TODO_CIRCLE && !m_suppressCircleHover) {
                     if (h.pi != m_hovCircPi || h.ti != m_hovCircTi) { m_hovCircPi = h.pi; m_hovCircTi = h.ti; m_circT = 0; }
+                    overCircle = true;
                 }
                 if (h.type == H_PROJ_DEL) {
                     if (h.pi != m_hoverProjDel) {
@@ -1262,8 +1265,13 @@ void App::onMouseMove(float x, float y) {
             }
         }
     }
+    // Clear the circle highlight when the mouse moves off it.
+    if (!overCircle && m_hovCircPi >= 0 && !m_suppressCircleHover) {
+        m_hovCircPi = -1; m_hovCircTi = -2; m_circT = 0;
+    }
     if (hpd < 0) { if (m_hoverProjDel >= 0) m_projDelT = 0; m_hoverProjDel = -1; }
     if (m_suppressCircleHover) { if (m_hovCircPi >= 0) m_circT = 0; m_hovCircPi = -1; m_hovCircTi = -2; }
+    requestRedraw(); // hover states change -> repaint so highlights appear
 }
 void App::onLButtonUp(float, float) {}
 void App::onLButtonDblClk(float x, float y) {
