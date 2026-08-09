@@ -54,7 +54,8 @@ bool App::animating() const {
     if (m_overlayAlpha > 0.01f) return true;
     if (m_aboutAlpha > 0.01f) return true;
     if ((m_addSpin > 0.001f && m_addSpin < 1.0f) ||
-        (m_gearSpin > 0.001f && m_gearSpin < 1.0f)) return true;
+        (m_gearSpin > 0.001f && m_gearSpin < 1.0f) ||
+        (m_projDelSpin > 0.001f && m_projDelSpin < 1.0f)) return true;
     if (!m_fades.empty()) return true;
     return false;
 }
@@ -496,9 +497,9 @@ D2D1_COLOR_F App::lerpColor(D2D1_COLOR_F a, D2D1_COLOR_F b, float t) const {
 // analysis) and return the offset from the draw-rect center to the ink
 // center, in DIPs. Rotating around this point keeps the icon spinning in
 // place instead of wobbling around the rect center.
-static D2D1_POINT_2F IconInkCenterOffset(Gfx& g, const wchar_t* s) {
+static D2D1_POINT_2F IconInkCenterOffset(Gfx& g, FontId fid, const wchar_t* s) {
     D2D1_POINT_2F off = {0, 0};
-    IDWriteTextFormat* f = g.font(F_SYM_BOTTOM);
+    IDWriteTextFormat* f = g.font(fid);
     IDWriteFontCollection* coll = nullptr;
     if (FAILED(f->GetFontCollection(&coll)) || !coll) return off;
     wchar_t family[128] = {};
@@ -648,8 +649,14 @@ void App::render() {
         }
         float delX = contentLeft + contentW - AppC::CARD_INNER - delW;
         D2D1_COLOR_F delCol = lerpColor(C::DEL_BTN, C::DEL_HOVER, m_projDelT);
-        g.drawText(L"\u2715", D2D1::RectF(delX, screenHy, delX + delW, screenHy + AppC::BADGE_H), F_SYM_TITLE, delCol,
+        D2D1_RECT_F delRc = D2D1::RectF(delX, screenHy, delX + delW, screenHy + AppC::BADGE_H);
+        D2D1_POINT_2F delOff = IconInkCenterOffset(g, F_SYM_TITLE, L"\u2715");
+        D2D1_POINT_2F delC = { delRc.left + (delRc.right - delRc.left) * 0.5f + delOff.x,
+                               delRc.top + (delRc.bottom - delRc.top) * 0.5f + delOff.y };
+        g.rt->SetTransform(D2D1::Matrix3x2F::Rotation(m_projDelSpin * 360.0f, delC));
+        g.drawText(L"\u2715", delRc, F_SYM_TITLE, delCol,
                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        g.rt->SetTransform(D2D1::Matrix3x2F::Identity());
         y = hy + AppC::BADGE_H + 6.0f;
 
         for (size_t ti = 0; ti < proj.todos.size(); ++ti) {
@@ -747,7 +754,7 @@ void App::render() {
     // analysis), not the button rect center.
     D2D1_COLOR_F addCol = lerpColor(C::TEXT, C::ACCENT, m_addT);
     D2D1_RECT_F addRc = D2D1::RectF(8, H - AppC::BOT_H, 44, H);
-    D2D1_POINT_2F addOff = IconInkCenterOffset(g, L"+");
+    D2D1_POINT_2F addOff = IconInkCenterOffset(g, F_SYM_BOTTOM, L"+");
     D2D1_POINT_2F addC = { addRc.left + (addRc.right - addRc.left) * 0.5f + addOff.x,
                            addRc.top + (addRc.bottom - addRc.top) * 0.5f + addOff.y };
     g.rt->SetTransform(D2D1::Matrix3x2F::Rotation(m_addSpin * 360.0f, addC));
@@ -756,7 +763,7 @@ void App::render() {
     g.rt->SetTransform(D2D1::Matrix3x2F::Identity());
     D2D1_COLOR_F gearCol = lerpColor(C::TEXT, C::ACCENT, m_gearT);
     D2D1_RECT_F gearRc = D2D1::RectF(W - 44, H - AppC::BOT_H, W - 8, H);
-    D2D1_POINT_2F gearOff = IconInkCenterOffset(g, L"\u2699");
+    D2D1_POINT_2F gearOff = IconInkCenterOffset(g, F_SYM_BOTTOM, L"\u2699");
     D2D1_POINT_2F gearC = { gearRc.left + (gearRc.right - gearRc.left) * 0.5f + gearOff.x,
                             gearRc.top + (gearRc.bottom - gearRc.top) * 0.5f + gearOff.y };
     g.rt->SetTransform(D2D1::Matrix3x2F::Rotation(m_gearSpin * 360.0f, gearC));
@@ -966,6 +973,8 @@ void App::tick(float dt) {
     else if (!m_hoverAdd && m_addSpin > 0.0f) m_addSpin = std::max(0.0f, m_addSpin - dt / 0.30f);
     if (m_hoverGear && m_gearSpin < 1.0f) m_gearSpin = std::min(1.0f, m_gearSpin + dt / 0.35f);
     else if (!m_hoverGear && m_gearSpin > 0.0f) m_gearSpin = std::max(0.0f, m_gearSpin - dt / 0.30f);
+    if (m_hoverProjDel >= 0 && m_projDelSpin < 1.0f) m_projDelSpin = std::min(1.0f, m_projDelSpin + dt / 0.35f);
+    else if (m_hoverProjDel < 0 && m_projDelSpin > 0.0f) m_projDelSpin = std::max(0.0f, m_projDelSpin - dt / 0.30f);
     approach(m_projDelT, m_hoverProjDel >= 0 ? 1.0f : 0.0f, dt, 18.0f);
     approach(m_circT, m_hovCircPi >= 0 ? 1.0f : 0.0f, dt, 20.0f);
     approach(m_checkT, m_hoverCheckbox ? 1.0f : 0.0f, dt, 18.0f);
@@ -1242,7 +1251,9 @@ void App::onMouseMove(float x, float y) {
                     if (h.pi != m_hovCircPi || h.ti != m_hovCircTi) { m_hovCircPi = h.pi; m_hovCircTi = h.ti; m_circT = 0; }
                 }
                 if (h.type == H_PROJ_DEL) {
-                    if (h.pi != m_hoverProjDel) { m_hoverProjDel = h.pi; m_projDelT = 0; }
+                    if (h.pi != m_hoverProjDel) {
+                        m_hoverProjDel = h.pi; m_projDelT = 0; m_projDelSpin = 0;
+                    }
                     hpd = h.pi;
                 }
                 break;
