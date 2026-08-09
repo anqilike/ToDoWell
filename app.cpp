@@ -549,7 +549,6 @@ static D2D1_POINT_2F IconInkCenterOffset(Gfx& g, const wchar_t* s) {
                     float inkCx = (((float)bnd.left + (float)bnd.right) * 0.5f) / sx[i];
                     float inkCy = (((float)bnd.top + (float)bnd.bottom) * 0.5f) / sy[i];
                     float ascent = em * (float)fm.ascent / (float)fm.designUnitsPerEm;
-                    float dpi = g.dpiScale > 0 ? g.dpiScale : 1.0f;
                     // Text metrics: width/height of the centered single glyph.
                     IDWriteTextLayout* lay = nullptr;
                     float textW = 0, lineH = 0;
@@ -561,9 +560,10 @@ static D2D1_POINT_2F IconInkCenterOffset(Gfx& g, const wchar_t* s) {
                     if (lineH <= 0)
                         lineH = em * (float)(fm.ascent + fm.descent + fm.lineGap) / (float)fm.designUnitsPerEm;
                     // For centered text the baseline sits at rectCenter + (ascent - lineH/2),
-                    // and the pen origin at rectCenter - textW/2.
-                    off.x = inkCx / dpi - textW * 0.5f;
-                    off.y = inkCy / dpi + ascent - lineH * 0.5f;
+                    // and the pen origin at rectCenter - textW/2. The analysis
+                    // ran with pixelsPerDip=1, so its pixel bounds are DIPs.
+                    off.x = inkCx - textW * 0.5f;
+                    off.y = inkCy + ascent - lineH * 0.5f;
                     break;
                 }
             }
