@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ToDoWell — 桌面极简待办事项管理工具</title>
+  <meta name="description" content="ToDoWell — 原生 C++17 + Direct2D 编写的桌面极简待办事项管理工具，单文件免安装，支持中文输入法候选框跟随与多套动画。">
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="nav">
+    <div class="nav-inner">
+      <span class="logo">ToDoWell</span>
+      <a class="nav-link" href="https://github.com/anqilike/ToDoWell" target="_blank" rel="noopener">GitHub</a>
+    </div>
+  </header>
+
+  <section class="hero">
+    <div class="hero-inner">
+      <div class="hero-text">
+        <h1>ToDoWell</h1>
+        <p class="tagline">常驻桌面右下角的极简待办工具</p>
+        <p class="subline">原生 C++17 + Direct2D 编写 · 单文件免安装 · Windows 7 / 11</p>
+        <div class="badges">
+          <span>C++17</span>
+          <span>Direct2D</span>
+          <span>免安装</span>
+          <span>离线可用</span>
+        </div>
+        <div class="hero-actions">
+          <a class="btn primary" href="https://github.com/anqilike/ToDoWell" target="_blank" rel="noopener">查看源码</a>
+          <a class="btn ghost" href="#features">功能特性</a>
+        </div>
+      </div>
+      <div class="app-mockup" aria-hidden="true">
+        <div class="mock-title">你好&nbsp;gogogo!!!</div>
+        <div class="mock-body">
+          <div class="mock-card">
+            <div class="mock-head"><span class="mock-badge b1">1</span><span class="mock-name">学习计划</span></div>
+            <div class="mock-row"><span class="mock-circle"></span><span class="mock-text">背英语单词</span></div>
+            <div class="mock-row"><span class="mock-circle"></span><span class="mock-text">写周报</span></div>
+            <div class="mock-row muted"><span class="mock-circle"></span><span class="mock-text">+ 新任务</span></div>
+          </div>
+          <div class="mock-card">
+            <div class="mock-head"><span class="mock-badge b2">2</span><span class="mock-name">生活</span></div>
+            <div class="mock-row"><span class="mock-circle"></span><span class="mock-text">买菜</span></div>
+            <div class="mock-row"><span class="mock-circle"></span><span class="mock-text">+ 新任务</span></div>
+          </div>
+        </div>
+        <div class="mock-bar"><span class="mock-plus">+</span><span class="mock-gear">⚙</span></div>
+      </div>
+    </div>
+  </section>
+
+  <section class="features" id="features">
+    <div class="wrap">
+      <h2>功能特性</h2>
+      <div class="grid">
+        <div class="card">
+          <h3>项目分类管理</h3>
+          <p>新建、双击改名、一键删除；8 色编号徽标循环标识，一目了然。</p>
+        </div>
+        <div class="card">
+          <h3>待办任务</h3>
+          <p>点击圆圈完成（带淡出动画）、单击文字编辑、回车连续新增，流畅顺手。</p>
+        </div>
+        <div class="card">
+          <h3>中文输入法跟随</h3>
+          <p>拼音组合窗口与候选列表跟随光标，Win7 / Win11 输入法均正常，候选弹层与界面风格一致。</p>
+        </div>
+        <div class="card">
+          <h3>自绘 UI 与动画</h3>
+          <p>Direct2D 硬件加速渲染；5 种归位动画、关闭淡出、图标悬停旋转、高亮渐变。</p>
+        </div>
+        <div class="card">
+          <h3>设置面板</h3>
+          <p>开机自启、标题前缀（最多 5 个汉字）、归位动画切换，一键生效。</p>
+        </div>
+        <div class="card">
+          <h3>数据持久化</h3>
+          <p>todos.json / config.json 每次操作即时写入，零第三方依赖，删除即可重置。</p>
+        </div>
+        <div class="card">
+          <h3>轻量单文件</h3>
+          <p>约 395 KB 单 exe，/MT 静态链接，不依赖 VCRedist，拷走即用。</p>
+        </div>
+        <div class="card">
+          <h3>平台兼容</h3>
+          <p>Windows 7（SP1 + Platform Update）与 Windows 11，支持高 DPI 显示。</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="versions">
+    <div class="wrap">
+      <h2>版本历史</h2>
+      <ul class="timeline">
+        <li><strong>2.5.5</strong> — 图标旋转中心修复、删除叉号悬停旋转、圆圈悬停高亮修复</li>
+        <li><strong>2.5.0</strong> — 输入法处理重写（候选框全平台跟随）、输入控件与界面融合、遮罩淡出修复</li>
+        <li><strong>2.0.0</strong> — C++ / Direct2D 重写完成，替代 Python / tkinter 版本</li>
+        <li><strong>1.5.0</strong> — Python / tkinter 原型版本（源码已归档）</li>
+      </ul>
+    </div>
+  </section>
+
+  <footer>
+    <div class="wrap">
+      <p>ToDoWell · 版本 2.5.5 · 版权所有 © 天才的5014</p>
+      <p><a href="https://github.com/anqilike/ToDoWell" target="_blank" rel="noopener">GitHub 仓库</a></p>
+    </div>
+  </footer>
+
+</body>
+</html>
