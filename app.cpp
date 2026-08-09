@@ -653,7 +653,9 @@ void App::render() {
         D2D1_POINT_2F delOff = IconInkCenterOffset(g, F_SYM_TITLE, L"\u2715");
         D2D1_POINT_2F delC = { delRc.left + (delRc.right - delRc.left) * 0.5f + delOff.x,
                                delRc.top + (delRc.bottom - delRc.top) * 0.5f + delOff.y };
-        g.rt->SetTransform(D2D1::Matrix3x2F::Rotation(m_projDelSpin * 360.0f, delC));
+        // Only the hovered delete button spins; other cards' buttons stay still.
+        float delSpin = (m_hoverProjDel == (int)pi) ? m_projDelSpin : 0.0f;
+        g.rt->SetTransform(D2D1::Matrix3x2F::Rotation(delSpin * 360.0f, delC));
         g.drawText(L"\u2715", delRc, F_SYM_TITLE, delCol,
                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         g.rt->SetTransform(D2D1::Matrix3x2F::Identity());
