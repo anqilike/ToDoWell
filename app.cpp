@@ -492,6 +492,89 @@ D2D1_COLOR_F App::lerpColor(D2D1_COLOR_F a, D2D1_COLOR_F b, float t) const {
     return D2D1::ColorF(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t);
 }
 
+// Measure the real ink bounding box of a symbol glyph (via glyph run
+// analysis) and return the offset from the draw-rect center to the ink
+// center, in DIPs. Rotating around this point keeps the icon spinning in
+// place instead of wobbling around the rect center.
+static D2D1_POINT_2F IconInkCenterOffset(Gfx& g, const wchar_t* s) {
+    D2D1_POINT_2F off = {0, 0};
+    IDWriteTextFormat* f = g.font(F_SYM_BOTTOM);
+    IDWriteFontCollection* coll = nullptr;
+    if (FAILED(f->GetFontCollection(&coll)) || !coll) return off;
+    wchar_t family[128] = {};
+    f->GetFontFamilyName(family, 128);
+    UINT32 famIdx = 0; BOOL exists = FALSE;
+    if (FAILED(coll->FindFamilyName(family, &famIdx, &exists)) || !exists) { coll->Release(); return off; }
+    IDWriteFontFamily* fam = nullptr;
+    if (FAILED(coll->GetFontFamily(famIdx, &fam)) || !fam) { coll->Release(); return off; }
+    IDWriteFont* font = nullptr;
+    if (FAILED(fam->GetFirstMatchingFont(f->GetFontWeight(), f->GetFontStretch(),
+                                         f->GetFontStyle(), &font)) || !font) {
+        fam->Release(); coll->Release(); return off;
+    }
+    IDWriteFontFace* face = nullptr;
+    if (SUCCEEDED(font->CreateFontFace(&face)) && face) {
+        DWRITE_FONT_METRICS fm = {};
+        face->GetMetrics(&fm);
+        UINT16 gi = 0;
+        UINT32 cp = (UINT32)s[0];
+        face->GetGlyphIndices(&cp, 1, &gi);
+        DWRITE_GLYPH_METRICS gm = {};
+        face->GetDesignGlyphMetrics(&gi, 1, &gm, FALSE);
+        float em = f->GetFontSize();
+        float adv = gm.advanceWidth * em / (float)fm.designUnitsPerEm;
+        DWRITE_GLYPH_RUN run = {};
+        run.fontFace = face;
+        run.fontEmSize = em;
+        run.glyphCount = 1;
+        run.glyphIndices = &gi;
+        run.glyphAdvances = &adv;
+        IDWriteGlyphRunAnalysis* ana = nullptr;
+        HRESULT hr = g.dw->CreateGlyphRunAnalysis(&run, 1.0f, nullptr,
+                                                  DWRITE_RENDERING_MODE_CLEARTYPE_NATURAL,
+                                                  DWRITE_MEASURING_MODE_NATURAL,
+                                                  0.0f, 0.0f, &ana);
+        if (SUCCEEDED(hr) && ana) {
+            const DWRITE_TEXTURE_TYPE types[3] = {
+                DWRITE_TEXTURE_ALIASED_1x1,
+                DWRITE_TEXTURE_CLEARTYPE_3x1 };
+            // Bounds are returned in device pixels (the texture type only
+            // affects the alpha data layout, not the coordinate space).
+            const float sx[2] = {1.0f, 1.0f};
+            const float sy[2] = {1.0f, 1.0f};
+            for (int i = 0; i < 2; ++i) {
+                RECT bnd = {};
+                if (SUCCEEDED(ana->GetAlphaTextureBounds(types[i], &bnd)) &&
+                    bnd.right > bnd.left && bnd.bottom > bnd.top) {
+                    float inkCx = (((float)bnd.left + (float)bnd.right) * 0.5f) / sx[i];
+                    float inkCy = (((float)bnd.top + (float)bnd.bottom) * 0.5f) / sy[i];
+                    float ascent = em * (float)fm.ascent / (float)fm.designUnitsPerEm;
+                    float dpi = g.dpiScale > 0 ? g.dpiScale : 1.0f;
+                    // Text metrics: width/height of the centered single glyph.
+                    IDWriteTextLayout* lay = nullptr;
+                    float textW = 0, lineH = 0;
+                    if (SUCCEEDED(g.dw->CreateTextLayout(s, 1, f, 100.0f, 100.0f, &lay)) && lay) {
+                        DWRITE_TEXT_METRICS tm = {};
+                        if (SUCCEEDED(lay->GetMetrics(&tm))) { textW = tm.width; lineH = tm.height; }
+                        lay->Release();
+                    }
+                    if (lineH <= 0)
+                        lineH = em * (float)(fm.ascent + fm.descent + fm.lineGap) / (float)fm.designUnitsPerEm;
+                    // For centered text the baseline sits at rectCenter + (ascent - lineH/2),
+                    // and the pen origin at rectCenter - textW/2.
+                    off.x = inkCx / dpi - textW * 0.5f;
+                    off.y = inkCy / dpi + ascent - lineH * 0.5f;
+                    break;
+                }
+            }
+            ana->Release();
+        }
+        face->Release();
+    }
+    font->Release(); fam->Release(); coll->Release();
+    return off;
+}
+
 void App::render() {
     Gfx& g = g_gfx;
     float W = g.clientW(), H = g.clientH();
@@ -660,35 +743,22 @@ void App::render() {
 
     // bottom bar
     g.fillRect(D2D1::RectF(0, H - AppC::BOT_H, W, H), C::PAGE);
-    // Rotate each icon around its own glyph center (not the button rect
-    // center): measure the actual text bounding box.
-    auto glyphCenter = [&](const wchar_t* s, D2D1_RECT_F rc) -> D2D1_POINT_2F {
-        D2D1_POINT_2F c = { rc.left + (rc.right - rc.left) * 0.5f, rc.top + (rc.bottom - rc.top) * 0.5f };
-        IDWriteTextFormat* f = g.font(F_SYM_BOTTOM);
-        f->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_CENTER);
-        f->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-        IDWriteTextLayout* lay = nullptr;
-        if (SUCCEEDED(g.dw->CreateTextLayout(s, (UINT32)wcslen(s), f,
-                                             rc.right - rc.left, rc.bottom - rc.top, &lay)) && lay) {
-            DWRITE_TEXT_METRICS tm;
-            if (SUCCEEDED(lay->GetMetrics(&tm))) {
-                c.x = rc.left + tm.left + tm.width * 0.5f;
-                c.y = rc.top + tm.top + tm.height * 0.5f;
-            }
-            lay->Release();
-        }
-        return c;
-    };
+    // Rotate each icon around its own ink center (measured via glyph run
+    // analysis), not the button rect center.
     D2D1_COLOR_F addCol = lerpColor(C::TEXT, C::ACCENT, m_addT);
     D2D1_RECT_F addRc = D2D1::RectF(8, H - AppC::BOT_H, 44, H);
-    D2D1_POINT_2F addC = glyphCenter(L"+", addRc);
+    D2D1_POINT_2F addOff = IconInkCenterOffset(g, L"+");
+    D2D1_POINT_2F addC = { addRc.left + (addRc.right - addRc.left) * 0.5f + addOff.x,
+                           addRc.top + (addRc.bottom - addRc.top) * 0.5f + addOff.y };
     g.rt->SetTransform(D2D1::Matrix3x2F::Rotation(m_addSpin * 360.0f, addC));
     g.drawText(L"+", addRc, F_SYM_BOTTOM, addCol,
                DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     g.rt->SetTransform(D2D1::Matrix3x2F::Identity());
     D2D1_COLOR_F gearCol = lerpColor(C::TEXT, C::ACCENT, m_gearT);
     D2D1_RECT_F gearRc = D2D1::RectF(W - 44, H - AppC::BOT_H, W - 8, H);
-    D2D1_POINT_2F gearC = glyphCenter(L"\u2699", gearRc);
+    D2D1_POINT_2F gearOff = IconInkCenterOffset(g, L"\u2699");
+    D2D1_POINT_2F gearC = { gearRc.left + (gearRc.right - gearRc.left) * 0.5f + gearOff.x,
+                            gearRc.top + (gearRc.bottom - gearRc.top) * 0.5f + gearOff.y };
     g.rt->SetTransform(D2D1::Matrix3x2F::Rotation(m_gearSpin * 360.0f, gearC));
     g.drawText(L"\u2699", gearRc, F_SYM_BOTTOM, gearCol,
                DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
