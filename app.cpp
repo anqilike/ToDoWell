@@ -122,14 +122,24 @@ static void HideImeCompositionWindowsInternal() {
         return TRUE;
     }, 0);
 }
-// Hide the IME's own composition/candidate windows only when the app is
-// rendering that UI itself (i.e. the IME exposes candidates via the IMM
-// bridge, like Microsoft Pinyin). IMEs that manage their own UI without
-// exposing candidate data (e.g. Sogou on Windows 7) keep their windows
-// visible so the candidate box still appears.
+// Hide the IME's own composition/candidate windows for modern TSF IMEs
+// (Microsoft Pinyin), which expose candidate data through the IMM bridge so
+// the app can render its own integrated UI. Legacy IMEs (e.g. Sogou on
+// Windows 7) keep their own windows visible.
 void App::hideImeWindows() {
-    if (!m_imeSelfRendered && m_cands.empty()) return;
+    if (m_imeLegacy) return;
     HideImeCompositionWindowsInternal();
+}
+bool App::detectLegacyIme() {
+    HKL hkl = GetKeyboardLayout(0);
+    wchar_t desc[128] = {};
+    if (ImmGetDescriptionW(hkl, desc, 128) > 0) {
+        std::wstring s(desc);
+        if (s.find(L"\u641c\u72d7") != std::wstring::npos ||   // 搜狗
+            s.find(L"Sogou") != std::wstring::npos ||
+            s.find(L"sogou") != std::wstring::npos) return true;
+    }
+    return false;
 }
 LRESULT CALLBACK EditSubproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_KEYDOWN) {
@@ -288,6 +298,9 @@ void App::pollIme() {
         while (!comp.empty() && comp.back() == 0) comp.pop_back();
     }
     bool textChanged = (comp != m_compositionText);
+    if (!comp.empty() && m_compositionText.empty()) {
+        m_imeLegacy = detectLegacyIme(); // detect per composition session
+    }
     m_compositionText = comp;
     if (textChanged) m_cursorBlink = 0;
 
@@ -296,7 +309,6 @@ void App::pollIme() {
     if (!comp.empty()) {
         DWORD count = ImmGetCandidateListCountW(himc, 0);
         if (count > 0) {
-            m_imeSelfRendered = true; // IME exposes candidates -> app renders its own UI
             DWORD sz = ImmGetCandidateListW(himc, 0, nullptr, 0);
             if (sz > 0) {
                 std::vector<BYTE> buf(sz);
@@ -311,11 +323,10 @@ void App::pollIme() {
             }
         }
     }
-    // Legacy path: IMEs that do not expose candidate data (e.g. Sogou on
-    // Windows 7) manage their own composition/candidate windows. Do not hide
-    // them; instead position them at the caret with the classic Imm* calls
-    // (screen coordinates), which these IMEs honor.
-    if (!m_imeSelfRendered && !comp.empty()) {
+    // Legacy path: IMEs like Sogou manage their own composition/candidate
+    // windows and do not expose candidate data. Position their windows at the
+    // caret with the classic Imm* calls (screen coordinates), which they honor.
+    if (m_imeLegacy && !comp.empty()) {
         FontId fid = F_TODO;
         if (m_editMode == ED_EDIT_PROJECT || m_editMode == ED_ADD_PROJECT) fid = F_PROJ_NAME;
         else if (m_editMode == ED_PREF_PREFIX) fid = F_SETTINGS;

@@ -83,7 +83,7 @@ private:
     float m_pollImeTimer = 0; // throttle for polling IME composition/candidates
     std::vector<std::wstring> m_cands; // current IME candidate list (app-rendered)
     int m_candSel = -1;                // selected candidate index
-    bool m_imeSelfRendered = false;    // IME exposes candidates -> app renders its own UI
+    bool m_imeLegacy = false;          // IME manages its own windows (e.g. Sogou on Win7)
 
     std::vector<Project> m_projects;
     Config m_cfg;
@@ -144,6 +144,7 @@ int m_hoverAdd = 0; float m_addT = 0;
 
     void rebuildHits();
     void pollIme();
+    bool detectLegacyIme();
     void beginEdit(EditMode mode, int pi, int ti, const std::wstring& initial);
     void endEdit(bool applyFocus);
     void ensureEditCreated();
