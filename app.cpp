@@ -904,18 +904,18 @@ void App::render() {
         g.drawText(L"ToDoWell", D2D1::RectF(dlgX + 16, ty, dlgX + dlgW - 16, ty + 28), F_ABOUT_TITLE, D2D1::ColorF(C::DIALOG_TX.r, C::DIALOG_TX.g, C::DIALOG_TX.b, oa), DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         ty += 34.0f;
         const wchar_t* feats[] = {
-            L"\u2022 \u70b9\u51fb + \u65b0\u5efa\u9879\u76ee\uff0c\u56de\u8f66\u786e\u8ba4\u540d\u79f0",
-            L"\u2022 \u5728\u9879\u76ee\u4e0b\u6309\u56de\u8f66\u5373\u53ef\u65b0\u589e\u5f85\u529e\u4efb\u52a1",
-            L"\u2022 \u70b9\u51fb\u4efb\u52a1\u524d\u5706\u5708\u6807\u8bb0\u5b8c\u6210\u5e76\u81ea\u52a8\u6d88\u5931",
-            L"\u2022 \u53cc\u51fb\u9879\u76ee\u540d\u6216\u4efb\u52a1\u6587\u5b57\u53ef\u7f16\u8f91\u4fee\u6539",
-            L"\u2022 \u8bbe\u7f6e\u4e2d\u4e00\u952e\u5f00\u542f\u6216\u5173\u95ed\u5f00\u673a\u81ea\u542f",
-            L"\u2022 \u652f\u6301\u81ea\u5b9a\u4e49\u6807\u9898\u524d\u7f00 + gogogo!!!",
-            L"\u2022 \u6240\u6709\u6570\u636e\u81ea\u52a8\u4fdd\u5b58\uff0c\u91cd\u542f\u8f6f\u4ef6\u4e0d\u4e22\u5931",
-            L"\u2022 \u8f6f\u4ef6\u57fa\u4e8e C++ \u548c Direct2D \u7f16\u8bd1",
-            L"\u2022 \u652f\u6301\u591a\u79cd\u5f52\u4f4d\u52a8\u753b\uff0c\u53ef\u5728\u8bbe\u7f6e\u4e2d\u5207\u6362\u9009\u62e9",
+            L"\u2022 项目分类管理：新建、双击改名、一键删除，8 色编号徽标",
+            L"\u2022 待办任务：点击圆圈完成（淡出动画）、单击编辑、回车连续新增",
+            L"\u2022 中文输入法：拼音组合与候选框跟随光标，Win7 / Win11 均正常",
+            L"\u2022 自绘 UI 与动画：Direct2D 硬件加速，归位动画、关闭淡出、悬停旋转",
+            L"\u2022 设置面板：开机自启、标题前缀（最多 5 个汉字）、动画一键切换",
+            L"\u2022 数据持久化：todos.json / config.json 即时写入，删除即可重置",
+            L"\u2022 轻量单文件：约 400 KB 单 exe，免安装、免联网、无第三方依赖",
+            L"\u2022 平台兼容：Windows 7 SP1+ / Windows 11，支持高 DPI",
+            L"\u2022 开源免费：源码托管于 GitHub",
         };
         float contentW = dlgW - 32.0f;
-        for (int i = 0; i < 9; ++i) {
+        for (int i = 0; i < (int)(sizeof(feats) / sizeof(feats[0])); ++i) {
             IDWriteTextLayout* lay = nullptr;
             g.dw->CreateTextLayout(feats[i], (UINT32)wcslen(feats[i]), g.font(F_HINT), contentW, 200.0f, &lay);
             DWRITE_TEXT_METRICS tm; lay->GetMetrics(&tm); SafeRelease(lay);
