@@ -63,6 +63,7 @@ public:
     void onCompositionUpdate(const std::wstring& s);
     void onCompositionResult(const std::wstring& s);
     void onCompositionEnd();
+    void hideImeWindows();
     HWND hwnd() const { return m_hwnd; }
     HWND editHwnd() const { return m_edit; }
 
@@ -82,6 +83,7 @@ private:
     float m_pollImeTimer = 0; // throttle for polling IME composition/candidates
     std::vector<std::wstring> m_cands; // current IME candidate list (app-rendered)
     int m_candSel = -1;                // selected candidate index
+    bool m_imeSelfRendered = false;    // IME exposes candidates -> app renders its own UI
 
     std::vector<Project> m_projects;
     Config m_cfg;

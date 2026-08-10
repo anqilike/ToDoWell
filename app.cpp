@@ -111,7 +111,7 @@ void App::ensureEditCreated() {
 // The IME draws the in-progress pinyin in its own floating window
 // ("MSCTFIME Composition"). The app renders the composition itself via D2D,
 // so this system window is hidden to keep the input visually integrated.
-static void HideImeCompositionWindows() {
+static void HideImeCompositionWindowsInternal() {
     EnumWindows([](HWND h, LPARAM) -> BOOL {
         wchar_t cls[64];
         if (GetClassNameW(h, cls, 64) > 0 && wcscmp(cls, L"MSCTFIME Composition") == 0) {
@@ -121,6 +121,15 @@ static void HideImeCompositionWindows() {
         }
         return TRUE;
     }, 0);
+}
+// Hide the IME's own composition/candidate windows only when the app is
+// rendering that UI itself (i.e. the IME exposes candidates via the IMM
+// bridge, like Microsoft Pinyin). IMEs that manage their own UI without
+// exposing candidate data (e.g. Sogou on Windows 7) keep their windows
+// visible so the candidate box still appears.
+void App::hideImeWindows() {
+    if (!m_imeSelfRendered && m_cands.empty()) return;
+    HideImeCompositionWindowsInternal();
 }
 LRESULT CALLBACK EditSubproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_KEYDOWN) {
@@ -146,13 +155,13 @@ LRESULT CALLBACK EditSubproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
         return 0;
     } else if (msg == WM_IME_SETCONTEXT) {
         LRESULT res = CallWindowProcW(g_editOldProc, h, msg, wp, lp);
-        HideImeCompositionWindows();
+        if (g_app) g_app->hideImeWindows();
         return res;
     } else if (msg == WM_IME_STARTCOMPOSITION) {
-        HideImeCompositionWindows();
+        if (g_app) g_app->hideImeWindows();
         return CallWindowProcW(g_editOldProc, h, msg, wp, lp);
     } else if (msg == WM_IME_COMPOSITION) {
-        HideImeCompositionWindows();
+        if (g_app) g_app->hideImeWindows();
         if (g_app && g_app->isEditing()) {
             HIMC himc = ImmGetContext(h);
             if (himc) {
@@ -287,6 +296,7 @@ void App::pollIme() {
     if (!comp.empty()) {
         DWORD count = ImmGetCandidateListCountW(himc, 0);
         if (count > 0) {
+            m_imeSelfRendered = true; // IME exposes candidates -> app renders its own UI
             DWORD sz = ImmGetCandidateListW(himc, 0, nullptr, 0);
             if (sz > 0) {
                 std::vector<BYTE> buf(sz);
@@ -300,6 +310,33 @@ void App::pollIme() {
                 }
             }
         }
+    }
+    // Legacy path: IMEs that do not expose candidate data (e.g. Sogou on
+    // Windows 7) manage their own composition/candidate windows. Do not hide
+    // them; instead position them at the caret with the classic Imm* calls
+    // (screen coordinates), which these IMEs honor.
+    if (!m_imeSelfRendered && !comp.empty()) {
+        FontId fid = F_TODO;
+        if (m_editMode == ED_EDIT_PROJECT || m_editMode == ED_ADD_PROJECT) fid = F_PROJ_NAME;
+        else if (m_editMode == ED_PREF_PREFIX) fid = F_SETTINGS;
+        float textW = g_gfx.measureTextW(m_editText + comp, fid);
+        float px = m_editRectDip.left + textW;
+        float py = m_editRectDip.bottom;
+        if (m_editMode != ED_PREF_PREFIX) py += AppC::TITLE_H - m_scroll;
+        POINT ptComp = { toPx(px), toPx(py) };
+        POINT ptCand = { toPx(px), toPx(py + 4.0f) };
+        ClientToScreen(m_hwnd, &ptComp);
+        ClientToScreen(m_hwnd, &ptCand);
+        COMPOSITIONFORM cf = {};
+        cf.dwStyle = CFS_POINT;
+        cf.ptCurrentPos = ptComp;
+        ImmSetCompositionWindow(himc, &cf);
+        CANDIDATEFORM cdf = {};
+        cdf.dwIndex = 0;
+        cdf.dwStyle = CFS_CANDIDATEPOS;
+        cdf.ptCurrentPos = ptCand;
+        cdf.rcArea = {0, 0, 0, 0};
+        ImmSetCandidateWindow(himc, &cdf);
     }
     bool candChanged = (cands != m_cands || sel != m_candSel);
     m_cands = std::move(cands);
@@ -927,7 +964,7 @@ void App::tick(float dt) {
         m_imeHideTimer += dt;
         if (m_imeHideTimer >= 0.25f) {
             m_imeHideTimer = 0;
-            HideImeCompositionWindows();
+            hideImeWindows();
         }
         m_pollImeTimer += dt;
         if (m_pollImeTimer >= 0.05f) {
