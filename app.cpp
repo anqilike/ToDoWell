@@ -128,6 +128,13 @@ static void HideImeCompositionWindowsInternal() {
 // Windows 7) keep their own windows visible.
 void App::hideImeWindows() {
     if (m_imeLegacy) return;
+    // Re-check the active IME before hiding anything: legacy IMEs (Sogou,
+    // other third-party IMEs) must keep their own windows, and hiding them
+    // at composition start is what made the candidate box disappear.
+    if (detectLegacyIme()) {
+        m_imeLegacy = true;
+        return;
+    }
     HideImeCompositionWindowsInternal();
 }
 bool App::detectLegacyIme() {
@@ -135,9 +142,16 @@ bool App::detectLegacyIme() {
     wchar_t desc[128] = {};
     if (ImmGetDescriptionW(hkl, desc, 128) > 0) {
         std::wstring s(desc);
+        // Microsoft built-in Pinyin exposes candidates through the IMM bridge
+        // and works with the app-rendered candidate popup.
+        if (s.find(L"Microsoft") != std::wstring::npos) return false;
+        if (s.find(L"\u5fae\u8f6f\u62fc\u97f3") != std::wstring::npos) return false; // 微软拼音
+        // Sogou and other third-party IMEs manage their own candidate UI and
+        // often do not expose candidate data -> keep their windows visible.
         if (s.find(L"\u641c\u72d7") != std::wstring::npos ||   // 搜狗
             s.find(L"Sogou") != std::wstring::npos ||
             s.find(L"sogou") != std::wstring::npos) return true;
+        return true; // any other non-Microsoft IME -> legacy path
     }
     return false;
 }
