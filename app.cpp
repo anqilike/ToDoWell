@@ -1042,7 +1042,9 @@ void App::render() {
         g.drawText(L"\u7248\u6743\u6240\u6709@\u5929\u624d\u7684anqilike", D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
         float posBottom = py + 18 + 2 * posH + posGap;
-        m_setContentH = (posBottom + 20.0f + sy) - dlgY + 10.0f;
+        // Content height must be independent of the current scroll offset;
+        // posBottom already moves with sy, so subtract it back out.
+        m_setContentH = (posBottom + 20.0f - sy) - dlgY + 10.0f;
     }
     if (m_about && m_aboutAlpha > 0.01f) {
         float dlgW = 220.0f, dlgH = 230.0f;
