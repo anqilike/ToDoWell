@@ -109,6 +109,7 @@ private:
     bool m_closing = false;
     std::wstring m_editText;
     std::wstring m_compositionText; // in-progress IME composition
+    std::wstring m_lastEditLayout;  // text used for the last hit layout rebuild
     float m_cursorBlink = 0; // cursor blink timer
     float m_closeAnim = 0; // 0..1 close animation progress
     int m_closeFrames = 0;
@@ -146,6 +147,7 @@ int m_hoverAdd = 0; float m_addT = 0;
     void pollIme();
     bool detectLegacyIme();
     float todoRowH(const std::wstring& text, float maxW); // wrapped row height
+    float rowHForTodo(int pi, int ti, float maxW);        // edit-aware todo row height
     void openHistory();
     void beginEdit(EditMode mode, int pi, int ti, const std::wstring& initial);
     void endEdit(bool applyFocus);

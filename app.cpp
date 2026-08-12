@@ -265,6 +265,7 @@ void App::endEdit(bool applyFocus) {
     m_reentering = true;
     m_editMode = ED_NONE; m_editPi = -1; m_editTi = -1;
     m_compositionText.clear();
+    m_lastEditLayout.clear();
     m_cands.clear();
     m_candSel = -1;
     m_reentering = false;
@@ -562,6 +563,13 @@ float App::todoRowH(const std::wstring& text, float maxW) {
     }
     return h < AppC::ROW_H ? AppC::ROW_H : h;
 }
+float App::rowHForTodo(int pi, int ti, float maxW) {
+    float h = todoRowH(m_projects[pi].todos[ti].text, maxW);
+    if (m_editMode == ED_EDIT_TODO && m_editPi == pi && m_editTi == ti) {
+        h = std::max(h, todoRowH(m_editText + m_compositionText, maxW));
+    }
+    return h;
+}
 void App::rebuildHits() {
     m_w = g_gfx.clientW();
     m_h = g_gfx.clientH();
@@ -603,7 +611,7 @@ void App::rebuildHits() {
             bool fading = false;
             for (auto& f : m_fades) if (f.pi == (int)pi && f.ti == (int)ti) { fading = true; break; }
             float rowTop = y;
-            float rh = todoRowH(proj.todos[ti].text, textRightRow - textXRow);
+            float rh = rowHForTodo((int)pi, (int)ti, textRightRow - textXRow);
             if (fading) { y = rowTop + rh; continue; }
             m_hits.push_back({D2D1::RectF(cxRow - AppC::CIRCLE_R - 4, rowTop, cxRow + AppC::CIRCLE_R + 4, rowTop + rh), H_TODO_CIRCLE, (int)pi, (int)ti});
             m_hits.push_back({D2D1::RectF(textXRow, rowTop, textRightRow, rowTop + rh), H_TODO_TEXT, (int)pi, (int)ti});
@@ -613,11 +621,15 @@ void App::rebuildHits() {
             y = rowTop + rh;
         }
         float ntTop = y;
-        m_hits.push_back({D2D1::RectF(contentLeft + AppC::CARD_INNER, ntTop, textRightRow, ntTop + AppC::ROW_H), H_NEWTODO, (int)pi, -1});
+        float ntH = AppC::ROW_H;
         if (m_editMode == ED_NEW_TODO && m_editPi == (int)pi) {
-            m_editRectDip = D2D1::RectF(textXRow, ntTop, textRightRow, ntTop + AppC::ROW_H);
+            ntH = todoRowH(m_editText + m_compositionText, textRightRow - textXRow);
         }
-        y = ntTop + AppC::ROW_H + 4.0f;
+        m_hits.push_back({D2D1::RectF(contentLeft + AppC::CARD_INNER, ntTop, textRightRow, ntTop + ntH), H_NEWTODO, (int)pi, -1});
+        if (m_editMode == ED_NEW_TODO && m_editPi == (int)pi) {
+            m_editRectDip = D2D1::RectF(textXRow, ntTop, textRightRow, ntTop + ntH);
+        }
+        y = ntTop + ntH + 4.0f;
         float cardBottom = y + 6.0f;
         m_contentH = std::max(m_contentH, cardBottom + AppC::CARD_GAP);
         (void)screenY;
@@ -771,10 +783,14 @@ void App::render() {
         float textXRow = cxRow + AppC::CIRCLE_R + 8.0f;
         float textRightRow = contentLeft + contentW - AppC::CARD_INNER;
         float rowsH = 0;
-        for (auto& t : proj.todos) rowsH += todoRowH(t.text, textRightRow - textXRow);
+        for (size_t ti = 0; ti < proj.todos.size(); ++ti)
+            rowsH += rowHForTodo((int)pi, (int)ti, textRightRow - textXRow);
+        float ntH = AppC::ROW_H;
+        if (m_editMode == ED_NEW_TODO && m_editPi == (int)pi)
+            ntH = todoRowH(m_editText + m_compositionText, textRightRow - textXRow);
         // Card white background
         float cardContentBot = y + AppC::CARD_TOP + AppC::BADGE_H + 6.0f
-                              + rowsH + AppC::ROW_H + 4.0f + 6.0f;
+                              + rowsH + ntH + 4.0f + 6.0f;
         float scrTop = cTop + y - scrollOff;
         float scrBot = cTop + cardContentBot - scrollOff;
         g.fillRoundedRect(D2D1::RectF(contentLeft, scrTop, contentLeft + contentW, scrBot), 8.0f, C::WHITE);
@@ -820,7 +836,7 @@ void App::render() {
             bool fading = false;
             float fa = 1.0f, fo = 0.0f;
             for (auto& f : m_fades) if (f.pi == (int)pi && f.ti == (int)ti) { fading = true; fa = f.alpha; fo = f.off; break; }
-            float rh = todoRowH(proj.todos[ti].text, textRightRow - textXRow);
+            float rh = rowHForTodo((int)pi, (int)ti, textRightRow - textXRow);
             if (fading) {
                 float cy = y + rh / 2.0f;
                 float sy = cTop + y - scrollOff + fo;
@@ -859,16 +875,16 @@ void App::render() {
             float sy = cTop + ntTop - scrollOff;
             g.drawEllipse(cxRow, cy + (cTop - scrollOff), AppC::CIRCLE_R, AppC::CIRCLE_R, C::CIRCLE, 1.5f);
             if (m_editMode == ED_NEW_TODO && m_editPi == (int)pi) {
-                g.drawLine(textXRow, sy + AppC::ROW_H - 2, textRightRow, sy + AppC::ROW_H - 2, C::ACCENT, 1.5f);
+                g.drawLine(textXRow, sy + ntH - 2, textRightRow, sy + ntH - 2, C::ACCENT, 1.5f);
                 std::wstring dtext = m_editText + m_compositionText;
-                g.drawText(dtext, D2D1::RectF(textXRow, sy, textRightRow, sy + AppC::ROW_H), F_TODO, C::TEXT,
+                g.drawText(dtext, D2D1::RectF(textXRow, sy, textRightRow, sy + ntH), F_TODO, C::TEXT,
                            DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                 float tw2 = g.measureTextW(m_editText, F_TODO);
                 float cw = g.measureTextW(m_compositionText, F_TODO);
-                if (((int)(m_cursorBlink * 2) % 2) == 0) g.drawLine(textXRow + tw2 + cw + 1, sy + 4, textXRow + tw2 + cw + 1, sy + AppC::ROW_H - 4, C::ACCENT, 1.5f);
+                if (((int)(m_cursorBlink * 2) % 2) == 0) g.drawLine(textXRow + tw2 + cw + 1, sy + 4, textXRow + tw2 + cw + 1, sy + ntH - 4, C::ACCENT, 1.5f);
             }
         }
-        y += AppC::ROW_H + 4.0f + 6.0f + AppC::CARD_GAP;
+        y += ntH + 4.0f + 6.0f + AppC::CARD_GAP;
 
     }
     m_contentH = std::max(m_contentH, y + AppC::CARD_GAP);
@@ -1100,6 +1116,14 @@ void App::tick(float dt) {
         }
         m_cursorBlink += dt;
         if (m_edit) {
+            // Rebuild layout when the edited text changes so rows wrap live
+            // while typing (not only after committing with Enter).
+            std::wstring curLayout = m_editText + m_compositionText;
+            if (curLayout != m_lastEditLayout) {
+                m_lastEditLayout = curLayout;
+                rebuildHits();
+                requestRedraw();
+            }
             // Sync committed text from EDIT (skip during IME composition to avoid
             // overwriting the D2D-rendered pinyin with the EDIT's bare text).
             if (m_compositionText.empty()) {
