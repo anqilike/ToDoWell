@@ -766,7 +766,9 @@ void App::render() {
     Gfx& g = g_gfx;
     float W = g.clientW(), H = g.clientH();
     g.rt->BeginDraw();
-    g.rt->Clear(D2D1::ColorF(0, 0, 0, 0));
+    // 用不透明的页面背景清屏：Win7 上透明黑清屏会在栏边界露出黑线。
+    g.rt->Clear(D2D1::ColorF(C::PAGE.r, C::PAGE.g, C::PAGE.b, 1.0f));
+    g.fillRect(D2D1::RectF(0, 0, W, H), C::PAGE);
 
     // title bar
     g.fillRect(D2D1::RectF(0, 0, W, AppC::TITLE_H), C::TITLE_BG);
