@@ -86,6 +86,7 @@ void App::create(HWND hwnd) {
     m_cfg.auto_start = is_auto_start();
     m_w = g_gfx.clientW();
     m_h = g_gfx.clientH();
+    refreshImeMode(); // 打开时立即识别当前输入法（搜狗走传统路径，微软拼音走自绘路径）
     if (!g_fontTodo) g_fontTodo = makeHFont(10, false);
     if (!g_fontProj) g_fontProj = makeHFont(12, true);
     rebuildHits();
@@ -158,6 +159,9 @@ bool App::detectLegacyIme() {
         return true; // any other non-Microsoft IME -> legacy path
     }
     return false;
+}
+void App::refreshImeMode() {
+    m_imeLegacy = detectLegacyIme();
 }
 LRESULT CALLBACK EditSubproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_KEYDOWN) {
@@ -1044,11 +1048,31 @@ void App::render() {
         g.drawText(L"\u5386\u53f2\u4ee3\u529e\u4efb\u52a1", D2D1::RectF(dlgX + 16, hy, dlgX + dlgW - 16, hy + 18), F_HINT, aboutCol);
         float aboutY = hy + 22.0f;
         g.drawText(L"\u5173\u4e8e ToDoWell", D2D1::RectF(dlgX + 16, aboutY, dlgX + dlgW - 16, aboutY + 18), F_HINT, aboutCol);
+        // Win7 输入法提示：内部版（5014）/ 公开版按版权署名自动区分
+        const bool internalBuild = std::wstring(kCopyright).find(L"5014") != std::wstring::npos;
+        const wchar_t* win7Note = internalBuild
+            ? L"\u6ce8\u610f\uff1a\u5982\u679c\u5728Win7\u7cfb\u7edf\u8f93\u5165\u6587\u5b57\u65f6\u65e0\u6cd5\u663e\u793a\u6587\u672c\u5019\u9009\u6846\uff0c\u8bf7\u8054\u7cfb5014\u83b7\u53d6\u6700\u65b0\u7248\u641c\u72d7\u8f93\u5165\u6cd5\u5b89\u88c5\u5305\uff0c\u5b89\u88c5\u540e\u5373\u53ef\u89e3\u51b3\uff08\u65e0\u9700\u7ba1\u7406\u5458\u6743\u9650\uff09\u3002"
+            : L"\u6ce8\u610f\uff1a\u5982\u679c\u5728Win7\u7cfb\u7edf\u8f93\u5165\u6587\u5b57\u65f6\u65e0\u6cd5\u663e\u793a\u6587\u672c\u5019\u9009\u6846\uff0c\u8bf7\u5b89\u88c5\u6700\u65b0\u7248\u641c\u72d7\u8f93\u5165\u6cd5\u5b89\u88c5\u5305\uff0c\u5b89\u88c5\u540e\u5373\u53ef\u89e3\u51b3\u3002Win10/11\u65e0\u6b64\u95ee\u9898\u3002";
+        float noteContentW = dlgW - 32.0f;
+        float noteTextH = 40.0f;
+        IDWriteTextLayout* noteLay = nullptr;
+        if (SUCCEEDED(g.dw->CreateTextLayout(win7Note, (UINT32)wcslen(win7Note), g.font(F_HINT), noteContentW, 200.0f, &noteLay)) && noteLay) {
+            DWRITE_TEXT_METRICS ntm = {};
+            if (SUCCEEDED(noteLay->GetMetrics(&ntm)) && ntm.height > 0) noteTextH = ntm.height;
+            SafeRelease(noteLay);
+        }
+        float noteY = aboutY + 22.0f;
+        float noteH = noteTextH + 8.0f;
+        g.fillRoundedRect(D2D1::RectF(dlgX + 8, noteY, dlgX + dlgW - 8, noteY + noteH), 6.0f,
+                          D2D1::ColorF(C::TITLE_BG.r, C::TITLE_BG.g, C::TITLE_BG.b, oa));
+        g.drawText(win7Note, D2D1::RectF(dlgX + 12, noteY + 4, dlgX + dlgW - 12, noteY + noteH - 4), F_HINT,
+                   D2D1::ColorF(C::TITLE_FG.r, C::TITLE_FG.g, C::TITLE_FG.b, oa),
+                   DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         g.rt->PopAxisAlignedClip();
         g.drawText(L"\u7248\u672c 2.5.6", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
-        float posBottom = aboutY + 18.0f;
+        float posBottom = noteY + noteH;
         // Content height must be independent of the current scroll offset;
         // posBottom already moves with sy, so subtract it back out.
         m_setContentH = (posBottom + 10.0f - sy) - dlgY + 10.0f;

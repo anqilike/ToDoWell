@@ -175,13 +175,17 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         }
         return DefWindowProcW(hwnd, msg, wp, lp);
     }
-        case WM_CHAR: {
+    case WM_CHAR: {
         if (g_app && !g_app->isEditing()) g_app->onChar((wchar_t)wp);
         return 0;
     }
-        
-        case WM_IME_SETCONTEXT:
-            return DefWindowProcW(hwnd, msg, wp, lp);
+    case WM_INPUTLANGCHANGE:
+        // 切换输入法时重新识别（搜狗/其他第三方 -> 传统路径，微软拼音 -> 自绘路径）
+        if (g_app) g_app->refreshImeMode();
+        return TRUE;
+         
+    case WM_IME_SETCONTEXT:
+        return DefWindowProcW(hwnd, msg, wp, lp);
         case WM_IME_STARTCOMPOSITION:
             return DefWindowProcW(hwnd, msg, wp, lp);
         case WM_IME_COMPOSITION:

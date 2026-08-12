@@ -64,6 +64,7 @@ public:
     void onCompositionResult(const std::wstring& s);
     void onCompositionEnd();
     void hideImeWindows();
+    void refreshImeMode();
     HWND hwnd() const { return m_hwnd; }
     HWND editHwnd() const { return m_edit; }
 
