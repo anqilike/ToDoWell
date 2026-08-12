@@ -1017,12 +1017,8 @@ void App::render() {
                        DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         }
         say += 2 * optH + optGap + 6.0f;
-        ay = say;
         D2D1_COLOR_F aboutCol = D2D1::ColorF(C::ACCENT.r, C::ACCENT.g, C::ACCENT.b, oa);
-        g.drawText(L"\u5173\u4e8e ToDoWell", D2D1::RectF(dlgX + 16, ay, dlgX + dlgW - 16, ay + 18), F_HINT, aboutCol);
-        float hy = ay + 22.0f;
-        g.drawText(L"\u5386\u53f2\u4ee3\u529e\u4efb\u52a1", D2D1::RectF(dlgX + 16, hy, dlgX + dlgW - 16, hy + 18), F_HINT, aboutCol);
-        float py = hy + 22.0f;
+        float py = say;
         g.drawText(L"\u9ed8\u8ba4\u7a97\u53e3\u4f4d\u7f6e\uff1a", D2D1::RectF(dlgX + 16, py, dlgX + dlgW - 16, py + 16), F_HINT, D2D1::ColorF(C::DIALOG_MM.r, C::DIALOG_MM.g, C::DIALOG_MM.b, oa));
         const wchar_t* posNames[4] = { L"\u53f3\u4e0b\u89d2", L"\u5de6\u4e0a\u89d2", L"\u5de6\u4e0b\u89d2", L"\u53f3\u4e0a\u89d2" };
         float posW = 92, posH = 22, posGap = 8;
@@ -1037,14 +1033,18 @@ void App::render() {
             g.drawText(posNames[i], D2D1::RectF(ox, oy, ox + posW, oy + posH), F_HINT, ptx,
                        DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         }
+        float hy = py + 18 + 2 * posH + posGap + 6.0f;
+        g.drawText(L"\u5386\u53f2\u4ee3\u529e\u4efb\u52a1", D2D1::RectF(dlgX + 16, hy, dlgX + dlgW - 16, hy + 18), F_HINT, aboutCol);
+        float aboutY = hy + 22.0f;
+        g.drawText(L"\u5173\u4e8e ToDoWell", D2D1::RectF(dlgX + 16, aboutY, dlgX + dlgW - 16, aboutY + 18), F_HINT, aboutCol);
         g.rt->PopAxisAlignedClip();
         g.drawText(L"\u7248\u672c 2.5.6", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(L"\u7248\u6743\u6240\u6709@\u5929\u624d\u7684anqilike", D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
-        float posBottom = py + 18 + 2 * posH + posGap;
+        float posBottom = aboutY + 18.0f;
         // Content height must be independent of the current scroll offset;
         // posBottom already moves with sy, so subtract it back out.
-        m_setContentH = (posBottom + 20.0f - sy) - dlgY + 10.0f;
+        m_setContentH = (posBottom + 10.0f - sy) - dlgY + 10.0f;
     }
     if (m_about && m_aboutAlpha > 0.01f) {
         float dlgW = 220.0f, dlgH = 230.0f;
@@ -1566,17 +1566,7 @@ void App::onLButtonDown(float x, float y) {
                 m_cfg.snap_anim = i; saveAll(); requestRedraw(); return;
             }
         }
-        ay = say + 2 * optH + optGap + 6;
-        if (inRect(x, y, D2D1::RectF(dlgX + 16, ay, dlgX + dlgW - 16, ay + 18))) {
-            openAbout();
-            return;
-        }
-        float hy = ay + 22.0f;
-        if (inRect(x, y, D2D1::RectF(dlgX + 16, hy, dlgX + dlgW - 16, hy + 18))) {
-            openHistory();
-            return;
-        }
-        float py = hy + 22.0f;
+        float py = say + 2 * optH + optGap + 6;
         float posW = 92, posH = 22, posGap = 8;
         for (int i = 0; i < 4; ++i) {
             int row = i / 2, col = i % 2;
@@ -1588,6 +1578,16 @@ void App::onLButtonDown(float x, float y) {
                 requestRedraw();
                 return;
             }
+        }
+        float hy = py + 18 + 2 * posH + posGap + 6;
+        if (inRect(x, y, D2D1::RectF(dlgX + 16, hy, dlgX + dlgW - 16, hy + 18))) {
+            openHistory();
+            return;
+        }
+        float aboutY = hy + 22;
+        if (inRect(x, y, D2D1::RectF(dlgX + 16, aboutY, dlgX + dlgW - 16, aboutY + 18))) {
+            openAbout();
+            return;
         }
         return;
     }
