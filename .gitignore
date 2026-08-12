@@ -29,3 +29,6 @@ fullscreen.png
 git rm --cached analyze.ps1 clickclose.ps1 grid.ps1 resizetest.ps1 screenshot.ps1 track.ps1 gen_doc.py ToDoWell.rar ToDoWell_2.0.0_doc.docx 2>>
 
 小红书配图/
+
+# 运行时数据
+history.json

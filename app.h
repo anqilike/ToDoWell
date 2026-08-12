@@ -145,6 +145,8 @@ int m_hoverAdd = 0; float m_addT = 0;
     void rebuildHits();
     void pollIme();
     bool detectLegacyIme();
+    float todoRowH(const std::wstring& text, float maxW); // wrapped row height
+    void openHistory();
     void beginEdit(EditMode mode, int pi, int ti, const std::wstring& initial);
     void endEdit(bool applyFocus);
     void ensureEditCreated();

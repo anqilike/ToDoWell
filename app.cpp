@@ -4,6 +4,7 @@
 #include <windowsx.h>
 #include <mmsystem.h>
 #include <imm.h>
+#include <shellapi.h>
 #include <cstdarg>
 #include "gfx.h"
 #include "app.h"
@@ -14,6 +15,7 @@
 #pragma comment(lib, "dwrite.lib")
 #pragma comment(lib, "winmm.lib")
 #pragma comment(lib, "imm32.lib")
+#pragma comment(lib, "shell32.lib")
 
 static WNDPROC g_editOldProc = nullptr;
 static HFONT g_fontTodo = nullptr;
@@ -284,8 +286,9 @@ void App::positionEdit() {
     // composition/candidate UI natively at the caret inside this control, and
     // the control paints its own text (styled to match the app).
     float editW = std::max(40.0f, m_editRectDip.right - m_editRectDip.left);
+    float editH = std::max(AppC::ROW_H, m_editRectDip.bottom - m_editRectDip.top);
     int ex = toPx(m_editRectDip.left), ey = toPx(editTop);
-    int ew = toPx(editW), eh = toPx(AppC::ROW_H);
+    int ew = toPx(editW), eh = toPx(editH);
     // Avoid repositioning every tick (1ms timer): a SetWindowPos storm disturbs
     // the IME's caret-geometry queries. Only move when something changed.
     if (ex != m_editPosX || ey != m_editPosY || ew != m_editPosW || eh != m_editPosH) {
@@ -350,8 +353,9 @@ void App::pollIme() {
         if (m_editMode != ED_PREF_PREFIX) py += AppC::TITLE_H - m_scroll;
         POINT ptComp = { toPx(px), toPx(py) };
         POINT ptCand = { toPx(px), toPx(py + 4.0f) };
-        ClientToScreen(m_hwnd, &ptComp);
-        ClientToScreen(m_hwnd, &ptCand);
+        // Legacy IMM IMEs (Sogou on Win7) expect CLIENT coordinates relative
+        // to the application window; screen coordinates made the candidate
+        // window clamp to the window edge or disappear entirely.
         COMPOSITIONFORM cf = {};
         cf.dwStyle = CFS_POINT;
         cf.ptCurrentPos = ptComp;
@@ -374,7 +378,21 @@ void App::cancelEdit() {
     if (m_addingProject) { m_addingProject = false; }
     endEdit(false);
 }
-void App::onEditKillFocus() {}
+void App::onEditKillFocus() {
+    if (m_editMode == ED_NONE || m_reentering) return;
+    if (m_editMode == ED_PREF_PREFIX) return; // handled by the settings click logic
+    // If the user typed something and clicked away without Enter, auto-commit
+    // the edit (like pressing Enter); an empty edit is simply cancelled.
+    std::wstring t = editGetText();
+    size_t a = t.find_first_not_of(L" \t\r\n");
+    size_t b = t.find_last_not_of(L" \t\r\n");
+    if (a != std::wstring::npos && b >= a) {
+        commitEdit();
+    } else {
+        if (m_addingProject) m_addingProject = false;
+        endEdit(false);
+    }
+}
 void App::onEditReturn() { commitEdit(); }
 void App::onEditEscape() {
     if (m_editMode == ED_PREF_PREFIX) { endEdit(false); closeSettings(); return; }
@@ -404,7 +422,7 @@ void App::commitEdit() {
         case ED_NEW_TODO: {
             int pi = m_editPi;
             if (!trimmed.empty() && pi >= 0 && pi < (int)m_projects.size()) {
-                m_projects[pi].todos.push_back({trimmed, false});
+                m_projects[pi].todos.push_back({trimmed, false, now_iso()});
                 saveAll();
                 rebuildHits();
                 m_cursorBlink = 0;
@@ -470,6 +488,80 @@ void App::closeSettings() {
 }
 void App::openAbout() { m_about = true; m_aboutScroll = 0; m_aboutScrollTarget = 0; requestRedraw(); }
 void App::closeAbout() { m_about = false; requestRedraw(); }
+static std::wstring HtmlEsc(const std::wstring& s) {
+    std::wstring o; o.reserve(s.size() + 8);
+    for (wchar_t c : s) {
+        switch (c) {
+            case L'&': o += L"&amp;"; break;
+            case L'<': o += L"&lt;"; break;
+            case L'>': o += L"&gt;"; break;
+            case L'"': o += L"&quot;"; break;
+            case L'\'': o += L"&#39;"; break;
+            default: o += c;
+        }
+    }
+    return o;
+}
+void App::openHistory() {
+    auto items = load_history();
+    std::wstring h;
+    h += L"<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">";
+    h += L"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
+    h += L"<title>ToDoWell \u5386\u53f2\u4ee3\u529e\u4efb\u52a1</title><style>";
+    h += L"body{font-family:'Microsoft YaHei',sans-serif;background:#f5f5f7;color:#1d1d1f;margin:0;padding:24px;}";
+    h += L".wrap{max-width:760px;margin:0 auto;}h1{font-size:22px;margin:0;}";
+    h += L".sum{color:#86868b;font-size:13px;margin:8px 0 18px;}";
+    h += L".card{background:#fff;border-radius:12px;padding:16px 18px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06);}";
+    h += L".proj{font-size:16px;font-weight:bold;margin:0 0 10px;}";
+    h += L"table{width:100%;border-collapse:collapse;font-size:13px;}";
+    h += L"th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #e5e5e5;vertical-align:top;}";
+    h += L"th{color:#86868b;font-weight:normal;font-size:12px;}";
+    h += L".dur{color:#0066cc;white-space:nowrap;}";
+    h += L".empty{color:#86868b;padding:40px 0;text-align:center;}";
+    h += L"footer{color:#aaa;font-size:12px;text-align:center;margin-top:24px;}";
+    h += L"</style></head><body><div class=\"wrap\">";
+    h += L"<h1>ToDoWell \u5386\u53f2\u4ee3\u529e\u4efb\u52a1</h1>";
+    h += L"<div class=\"sum\">\u5171\u5b8c\u6210 " + std::to_wstring((int)items.size()) + L" \u6761\u4efb\u52a1</div>";
+    if (items.empty()) {
+        h += L"<div class=\"empty\">\u8fd8\u6ca1\u6709\u5b8c\u6210\u8fc7\u4efb\u52a1\uff0c\u70b9\u51fb\u5f85\u529e\u524d\u7684\u5706\u5708\u5b8c\u6210\u5373\u53ef\u8bb0\u5f55\u5230\u8fd9\u91cc\u3002</div>";
+    } else {
+        std::vector<std::pair<std::wstring, std::vector<HistoryItem>>> groups;
+        for (auto& it : items) {
+            bool found = false;
+            for (auto& g : groups) if (g.first == it.project) { g.second.push_back(it); found = true; break; }
+            if (!found) groups.push_back({it.project, {it}});
+        }
+        for (auto& g : groups) {
+            h += L"<div class=\"card\"><div class=\"proj\">" + HtmlEsc(g.first) + L"</div><table>";
+            h += L"<tr><th>\u4efb\u52a1</th><th>\u5efa\u7acb\u65f6\u95f4</th><th>\u5b8c\u6210\u65f6\u95f4</th><th>\u8017\u65f6</th></tr>";
+            for (auto& it : g.second) {
+                h += L"<tr><td>" + HtmlEsc(it.text) + L"</td>";
+                h += L"<td>" + HtmlEsc(iso_to_display(it.created)) + L"</td>";
+                h += L"<td>" + HtmlEsc(iso_to_display(it.completed)) + L"</td>";
+                h += L"<td class=\"dur\">" + HtmlEsc(duration_text(it.created, it.completed)) + L"</td></tr>";
+            }
+            h += L"</table></div>";
+        }
+    }
+    h += L"<footer>\u7531 ToDoWell \u751f\u6210</footer></div></body></html>";
+    if (write_utf8_file(L"history.html", h)) {
+        ShellExecuteW(m_hwnd, L"open", (exe_dir() + L"history.html").c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+    } else {
+        MessageBoxW(m_hwnd, L"\u65e0\u6cd5\u5199\u5165\u5386\u53f2\u9875\u9762\uff08history.html\uff09\u3002", L"ToDoWell", MB_OK | MB_ICONWARNING);
+    }
+}
+float App::todoRowH(const std::wstring& text, float maxW) {
+    if (text.empty()) return AppC::ROW_H;
+    IDWriteTextLayout* lay = nullptr;
+    float h = AppC::ROW_H;
+    if (SUCCEEDED(g_gfx.dw->CreateTextLayout(text.c_str(), (UINT32)text.size(),
+                                             g_gfx.font(F_TODO), maxW, 1000.0f, &lay)) && lay) {
+        DWRITE_TEXT_METRICS tm = {};
+        if (SUCCEEDED(lay->GetMetrics(&tm)) && tm.height > 0) h = tm.height + 4.0f;
+        lay->Release();
+    }
+    return h < AppC::ROW_H ? AppC::ROW_H : h;
+}
 void App::rebuildHits() {
     m_w = g_gfx.clientW();
     m_h = g_gfx.clientH();
@@ -503,36 +595,32 @@ void App::rebuildHits() {
         }
         float headerH = AppC::BADGE_H;
         y = hy + headerH + 6.0f;
+        float cxRow = contentLeft + AppC::CARD_INNER + AppC::CIRCLE_R + 2.0f;
+        float textXRow = cxRow + AppC::CIRCLE_R + 8.0f;
+        float textRightRow = contentLeft + contentW - AppC::CARD_INNER;
 
         for (size_t ti = 0; ti < proj.todos.size(); ++ti) {
             bool fading = false;
             for (auto& f : m_fades) if (f.pi == (int)pi && f.ti == (int)ti) { fading = true; break; }
-            if (fading) { y += AppC::ROW_H; continue; }
             float rowTop = y;
-            float cx = contentLeft + AppC::CARD_INNER + AppC::CIRCLE_R + 2.0f;
-            float cy = rowTop + AppC::ROW_H / 2.0f;
-            float textX = cx + AppC::CIRCLE_R + 8.0f;
-            float textRight = contentLeft + contentW - AppC::CARD_INNER;
-            m_hits.push_back({D2D1::RectF(cx - AppC::CIRCLE_R - 4, rowTop, cx + AppC::CIRCLE_R + 4, rowTop + AppC::ROW_H), H_TODO_CIRCLE, (int)pi, (int)ti});
-            m_hits.push_back({D2D1::RectF(textX, rowTop, textRight, rowTop + AppC::ROW_H), H_TODO_TEXT, (int)pi, (int)ti});
+            float rh = todoRowH(proj.todos[ti].text, textRightRow - textXRow);
+            if (fading) { y = rowTop + rh; continue; }
+            m_hits.push_back({D2D1::RectF(cxRow - AppC::CIRCLE_R - 4, rowTop, cxRow + AppC::CIRCLE_R + 4, rowTop + rh), H_TODO_CIRCLE, (int)pi, (int)ti});
+            m_hits.push_back({D2D1::RectF(textXRow, rowTop, textRightRow, rowTop + rh), H_TODO_TEXT, (int)pi, (int)ti});
             if (m_editMode == ED_EDIT_TODO && m_editPi == (int)pi && m_editTi == (int)ti) {
-                m_editRectDip = D2D1::RectF(textX, rowTop, textRight, rowTop + AppC::ROW_H);
+                m_editRectDip = D2D1::RectF(textXRow, rowTop, textRightRow, rowTop + rh);
             }
-            y = rowTop + AppC::ROW_H;
+            y = rowTop + rh;
         }
         float ntTop = y;
-        float cx = contentLeft + AppC::CARD_INNER + AppC::CIRCLE_R + 2.0f;
-        float cy = ntTop + AppC::ROW_H / 2.0f;
-        float textX = cx + AppC::CIRCLE_R + 8.0f;
-        float textRight = contentLeft + contentW - AppC::CARD_INNER;
-        m_hits.push_back({D2D1::RectF(contentLeft + AppC::CARD_INNER, ntTop, textRight, ntTop + AppC::ROW_H), H_NEWTODO, (int)pi, -1});
+        m_hits.push_back({D2D1::RectF(contentLeft + AppC::CARD_INNER, ntTop, textRightRow, ntTop + AppC::ROW_H), H_NEWTODO, (int)pi, -1});
         if (m_editMode == ED_NEW_TODO && m_editPi == (int)pi) {
-            m_editRectDip = D2D1::RectF(textX, ntTop, textRight, ntTop + AppC::ROW_H);
+            m_editRectDip = D2D1::RectF(textXRow, ntTop, textRightRow, ntTop + AppC::ROW_H);
         }
         y = ntTop + AppC::ROW_H + 4.0f;
         float cardBottom = y + 6.0f;
         m_contentH = std::max(m_contentH, cardBottom + AppC::CARD_GAP);
-        (void)cy; (void)screenY; (void)cx;
+        (void)screenY;
         y = cardBottom;
         y += AppC::CARD_GAP;
     }
@@ -679,10 +767,14 @@ void App::render() {
 
     for (size_t pi = 0; pi < m_projects.size(); ++pi) {
         auto& proj = m_projects[pi];
+        float cxRow = contentLeft + AppC::CARD_INNER + AppC::CIRCLE_R + 2.0f;
+        float textXRow = cxRow + AppC::CIRCLE_R + 8.0f;
+        float textRightRow = contentLeft + contentW - AppC::CARD_INNER;
+        float rowsH = 0;
+        for (auto& t : proj.todos) rowsH += todoRowH(t.text, textRightRow - textXRow);
         // Card white background
         float cardContentBot = y + AppC::CARD_TOP + AppC::BADGE_H + 6.0f
-                              + (float)proj.todos.size() * AppC::ROW_H
-                              + AppC::ROW_H + 4.0f + 6.0f;
+                              + rowsH + AppC::ROW_H + 4.0f + 6.0f;
         float scrTop = cTop + y - scrollOff;
         float scrBot = cTop + cardContentBot - scrollOff;
         g.fillRoundedRect(D2D1::RectF(contentLeft, scrTop, contentLeft + contentW, scrBot), 8.0f, C::WHITE);
@@ -728,60 +820,52 @@ void App::render() {
             bool fading = false;
             float fa = 1.0f, fo = 0.0f;
             for (auto& f : m_fades) if (f.pi == (int)pi && f.ti == (int)ti) { fading = true; fa = f.alpha; fo = f.off; break; }
+            float rh = todoRowH(proj.todos[ti].text, textRightRow - textXRow);
             if (fading) {
-                float cx = contentLeft + AppC::CARD_INNER + AppC::CIRCLE_R + 2.0f;
-                float cy = y + AppC::ROW_H / 2.0f;
-                float textX = cx + AppC::CIRCLE_R + 8.0f;
-                float textRight = contentLeft + contentW - AppC::CARD_INNER;
+                float cy = y + rh / 2.0f;
                 float sy = cTop + y - scrollOff + fo;
                 D2D1_COLOR_F cc = D2D1::ColorF(C::ACCENT.r, C::ACCENT.g, C::ACCENT.b, fa);
-                g.drawEllipse(cx, cy + (cTop - scrollOff) + fo, AppC::CIRCLE_R, AppC::CIRCLE_R, cc, 1.8f);
+                g.drawEllipse(cxRow, cy + (cTop - scrollOff) + fo, AppC::CIRCLE_R, AppC::CIRCLE_R, cc, 1.8f);
                 g.rt->SetTransform(D2D1::Matrix3x2F::Identity());
                 D2D1_COLOR_F tc = D2D1::ColorF(C::TEXT.r, C::TEXT.g, C::TEXT.b, fa);
-                g.drawText(proj.todos[ti].text, D2D1::RectF(textX, cTop + y - scrollOff + fo, textRight, cTop + y - scrollOff + fo + AppC::ROW_H), F_TODO, tc,
+                g.drawText(proj.todos[ti].text, D2D1::RectF(textXRow, cTop + y - scrollOff + fo, textRightRow, cTop + y - scrollOff + fo + rh), F_TODO, tc,
                            DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                 (void)fa; (void)fo;
-                y += AppC::ROW_H;
+                y += rh;
                 continue;
             }
             float rowTop = y;
-            float cx = contentLeft + AppC::CARD_INNER + AppC::CIRCLE_R + 2.0f;
-            float cy = rowTop + AppC::ROW_H / 2.0f;
-            float textX = cx + AppC::CIRCLE_R + 8.0f;
-            float textRight = contentLeft + contentW - AppC::CARD_INNER;
+            float cy = rowTop + rh / 2.0f;
             float sy = cTop + rowTop - scrollOff;
             bool hov = (m_hovCircPi == (int)pi && m_hovCircTi == (int)ti);
             D2D1_COLOR_F cc = hov ? lerpColor(C::CIRCLE, C::ACCENT, m_circT) : C::CIRCLE;
-            g.drawEllipse(cx, cy + (cTop - scrollOff), AppC::CIRCLE_R, AppC::CIRCLE_R, cc, 1.8f);
+            g.drawEllipse(cxRow, cy + (cTop - scrollOff), AppC::CIRCLE_R, AppC::CIRCLE_R, cc, 1.8f);
             if (!(m_editMode == ED_EDIT_TODO && m_editPi == (int)pi && m_editTi == (int)ti)) {
-                g.drawText(proj.todos[ti].text, D2D1::RectF(textX, sy, textRight, sy + AppC::ROW_H), F_TODO, C::TEXT,
+                g.drawText(proj.todos[ti].text, D2D1::RectF(textXRow, sy, textRightRow, sy + rh), F_TODO, C::TEXT,
                            DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             } else {
                 std::wstring dtext = m_editText + m_compositionText;
-                g.drawText(dtext, D2D1::RectF(textX, sy, textRight, sy + AppC::ROW_H), F_TODO, C::TEXT,
+                g.drawText(dtext, D2D1::RectF(textXRow, sy, textRightRow, sy + rh), F_TODO, C::TEXT,
                            DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                 float tw2 = g.measureTextW(m_editText, F_TODO);
                 float cw = g.measureTextW(m_compositionText, F_TODO);
-                if (((int)(m_cursorBlink * 2) % 2) == 0) g.drawLine(textX + tw2 + cw + 1, sy + 4, textX + tw2 + cw + 1, sy + AppC::ROW_H - 4, C::ACCENT, 1.5f);
+                if (((int)(m_cursorBlink * 2) % 2) == 0) g.drawLine(textXRow + tw2 + cw + 1, sy + 4, textXRow + tw2 + cw + 1, sy + rh - 4, C::ACCENT, 1.5f);
             }
-            y += AppC::ROW_H;
+            y += rh;
         }
         {
             float ntTop = y;
-            float cx = contentLeft + AppC::CARD_INNER + AppC::CIRCLE_R + 2.0f;
             float cy = ntTop + AppC::ROW_H / 2.0f;
-            float textX = cx + AppC::CIRCLE_R + 8.0f;
-            float textRight = contentLeft + contentW - AppC::CARD_INNER;
             float sy = cTop + ntTop - scrollOff;
-            g.drawEllipse(cx, cy + (cTop - scrollOff), AppC::CIRCLE_R, AppC::CIRCLE_R, C::CIRCLE, 1.5f);
+            g.drawEllipse(cxRow, cy + (cTop - scrollOff), AppC::CIRCLE_R, AppC::CIRCLE_R, C::CIRCLE, 1.5f);
             if (m_editMode == ED_NEW_TODO && m_editPi == (int)pi) {
-                g.drawLine(textX, sy + AppC::ROW_H - 2, textRight, sy + AppC::ROW_H - 2, C::ACCENT, 1.5f);
+                g.drawLine(textXRow, sy + AppC::ROW_H - 2, textRightRow, sy + AppC::ROW_H - 2, C::ACCENT, 1.5f);
                 std::wstring dtext = m_editText + m_compositionText;
-                g.drawText(dtext, D2D1::RectF(textX, sy, textRight, sy + AppC::ROW_H), F_TODO, C::TEXT,
+                g.drawText(dtext, D2D1::RectF(textXRow, sy, textRightRow, sy + AppC::ROW_H), F_TODO, C::TEXT,
                            DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
                 float tw2 = g.measureTextW(m_editText, F_TODO);
                 float cw = g.measureTextW(m_compositionText, F_TODO);
-                if (((int)(m_cursorBlink * 2) % 2) == 0) g.drawLine(textX + tw2 + cw + 1, sy + 4, textX + tw2 + cw + 1, sy + AppC::ROW_H - 4, C::ACCENT, 1.5f);
+                if (((int)(m_cursorBlink * 2) % 2) == 0) g.drawLine(textXRow + tw2 + cw + 1, sy + 4, textXRow + tw2 + cw + 1, sy + AppC::ROW_H - 4, C::ACCENT, 1.5f);
             }
         }
         y += AppC::ROW_H + 4.0f + 6.0f + AppC::CARD_GAP;
@@ -899,11 +983,29 @@ void App::render() {
         ay = say;
         D2D1_COLOR_F aboutCol = D2D1::ColorF(C::ACCENT.r, C::ACCENT.g, C::ACCENT.b, oa);
         g.drawText(L"\u5173\u4e8e ToDoWell", D2D1::RectF(dlgX + 16, ay, dlgX + dlgW - 16, ay + 18), F_HINT, aboutCol);
+        float hy = ay + 22.0f;
+        g.drawText(L"\u5386\u53f2\u4ee3\u529e\u4efb\u52a1", D2D1::RectF(dlgX + 16, hy, dlgX + dlgW - 16, hy + 18), F_HINT, aboutCol);
+        float py = hy + 22.0f;
+        g.drawText(L"\u9ed8\u8ba4\u7a97\u53e3\u4f4d\u7f6e\uff1a", D2D1::RectF(dlgX + 16, py, dlgX + dlgW - 16, py + 16), F_HINT, D2D1::ColorF(C::DIALOG_MM.r, C::DIALOG_MM.g, C::DIALOG_MM.b, oa));
+        const wchar_t* posNames[4] = { L"\u53f3\u4e0b\u89d2", L"\u5de6\u4e0a\u89d2", L"\u5de6\u4e0b\u89d2", L"\u53f3\u4e0a\u89d2" };
+        float posW = 92, posH = 22, posGap = 8;
+        for (int i = 0; i < 4; ++i) {
+            int row = i / 2, col = i % 2;
+            float ox = dlgX + 16 + col * (posW + posGap);
+            float oy = py + 18 + row * (posH + posGap);
+            bool sel = (m_cfg.default_pos == i);
+            if (sel) g.fillRoundedRect(D2D1::RectF(ox, oy, ox + posW, oy + posH), 4.0f, D2D1::ColorF(C::ACCENT.r, C::ACCENT.g, C::ACCENT.b, oa));
+            else g.strokeRoundedRect(D2D1::RectF(ox, oy, ox + posW, oy + posH), 4.0f, D2D1::ColorF(C::INPUT_BD.r, C::INPUT_BD.g, C::INPUT_BD.b, oa), 1.0f);
+            D2D1_COLOR_F ptx = sel ? D2D1::ColorF(1, 1, 1, oa) : D2D1::ColorF(C::DIALOG_TX.r, C::DIALOG_TX.g, C::DIALOG_TX.b, oa);
+            g.drawText(posNames[i], D2D1::RectF(ox, oy, ox + posW, oy + posH), F_HINT, ptx,
+                       DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        }
         g.rt->PopAxisAlignedClip();
         g.drawText(L"\u7248\u672c 2.5.6", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(L"\u7248\u6743\u6240\u6709@\u5929\u624d\u7684anqilike", D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
-        m_setContentH = (ay + 20.0f + sy) - dlgY + 10.0f;
+        float posBottom = py + 18 + 2 * posH + posGap;
+        m_setContentH = (posBottom + 20.0f + sy) - dlgY + 10.0f;
     }
     if (m_about && m_aboutAlpha > 0.01f) {
         float dlgW = 220.0f, dlgH = 230.0f;
@@ -950,7 +1052,7 @@ void App::render() {
         else if (m_editMode == ED_PREF_PREFIX) fid = F_SETTINGS;
         float textW = g.measureTextW(m_editText + m_compositionText, fid);
         float cx = m_editRectDip.left + textW;
-        float cy = m_editRectDip.top + AppC::ROW_H + 4.0f;
+        float cy = m_editRectDip.top + std::max(AppC::ROW_H, m_editRectDip.bottom - m_editRectDip.top) + 4.0f;
         if (m_editMode != ED_PREF_PREFIX) cy += AppC::TITLE_H - m_scroll;
 
         const float itemH = 20.0f, pad = 8.0f, numW = 20.0f;
@@ -1053,6 +1155,15 @@ void App::tick(float dt) {
             if (it->pi >= 0 && it->pi < (int)m_projects.size()) {
                 auto& ts = m_projects[it->pi].todos;
                 if (it->ti >= 0 && it->ti < (int)ts.size()) {
+                    // Record into the completed-task history before removing.
+                    HistoryItem hi;
+                    hi.project = m_projects[it->pi].name;
+                    hi.text = ts[it->ti].text;
+                    hi.created = ts[it->ti].created;
+                    hi.completed = now_iso();
+                    auto hist = load_history();
+                    hist.push_back(hi);
+                    save_history(hist);
                     ts.erase(ts.begin() + it->ti);
                     needSave = true;
                 }
@@ -1413,6 +1524,24 @@ void App::onLButtonDown(float x, float y) {
             openAbout();
             return;
         }
+        float hy = ay + 22.0f;
+        if (inRect(x, y, D2D1::RectF(dlgX + 16, hy, dlgX + dlgW - 16, hy + 18))) {
+            openHistory();
+            return;
+        }
+        float py = hy + 22.0f;
+        float posW = 92, posH = 22, posGap = 8;
+        for (int i = 0; i < 4; ++i) {
+            int row = i / 2, col = i % 2;
+            float ox = dlgX + 16 + col * (posW + posGap);
+            float oy = py + 18 + row * (posH + posGap);
+            if (inRect(x, y, D2D1::RectF(ox, oy, ox + posW, oy + posH))) {
+                m_cfg.default_pos = i;
+                saveAll();
+                requestRedraw();
+                return;
+            }
+        }
         return;
     }
     float closeW = 32, snapW = 32, gap = 8, rightPad = 12;
@@ -1424,9 +1553,16 @@ void App::onLButtonDown(float x, float y) {
         if (inRect(x, y, D2D1::RectF(snapX, btnY1, snapX + snapW, btnY2))) {
             RECT wa; SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
             int pw = toPx(W), ph = toPx(H);
+            int tx = wa.right - pw, ty = wa.bottom - ph;
+            switch (m_cfg.default_pos) {
+                case 1: tx = wa.left; ty = wa.top; break;          // 左上角
+                case 2: tx = wa.left; ty = wa.bottom - ph; break;  // 左下角
+                case 3: tx = wa.right - pw; ty = wa.top; break;    // 右上角
+                default: break;                                     // 右下角
+            }
             RECT cur; GetWindowRect(m_hwnd, &cur);
             m_snapFromX = cur.left; m_snapFromY = cur.top;
-            m_snapToX = wa.right - pw; m_snapToY = wa.bottom - ph;
+            m_snapToX = tx; m_snapToY = ty;
             m_snapAnim = 0; m_snapping = true; m_snappedToTarget = false;
             return;
         }

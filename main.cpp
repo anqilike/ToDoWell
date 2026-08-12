@@ -50,9 +50,17 @@ static void ApplyRoundCorners(HWND hwnd) {
     }
 }
 
-static void SnapBottomRight(HWND hwnd, int pw, int ph) {
+static void SnapToDefault(HWND hwnd, int pw, int ph) {
+    Config cfg = load_config();
     RECT wa; SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
-    SetWindowPos(hwnd, nullptr, wa.right - pw, wa.bottom - ph, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
+    int x = wa.right - pw, y = wa.bottom - ph; // 0 = 右下角（默认）
+    switch (cfg.default_pos) {
+        case 1: x = wa.left; y = wa.top; break;          // 左上角
+        case 2: x = wa.left; y = wa.bottom - ph; break;  // 左下角
+        case 3: x = wa.right - pw; y = wa.top; break;    // 右上角
+        default: break;
+    }
+    SetWindowPos(hwnd, nullptr, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER);
 }
 
 static int CalcWindowW() {
@@ -233,7 +241,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
         nullptr, nullptr, hInst, nullptr);
     if (!hwnd) return 0;
 
-    SnapBottomRight(hwnd, pw, ph);
+    SnapToDefault(hwnd, pw, ph);
     ShowWindow(hwnd, nShow);
     UpdateWindow(hwnd);
 
