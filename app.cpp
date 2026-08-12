@@ -570,6 +570,24 @@ float App::rowHForTodo(int pi, int ti, float maxW) {
     }
     return h;
 }
+float App::todoCircleY(const std::wstring& text, float rowTop, float maxW) {
+    float y = rowTop + AppC::ROW_H * 0.5f;
+    IDWriteTextLayout* lay = nullptr;
+    if (SUCCEEDED(g_gfx.dw->CreateTextLayout(text.c_str(), (UINT32)text.size(),
+                                             g_gfx.font(F_TODO), maxW, 1000.0f, &lay)) && lay) {
+        DWRITE_TEXT_METRICS tm = {};
+        UINT32 lines = 0;
+        if (SUCCEEDED(lay->GetMetrics(&tm)) &&
+            SUCCEEDED(lay->GetLineMetrics(nullptr, 0, &lines)) && lines > 0) {
+            float lineH = tm.height / (float)lines;
+            float rh = todoRowH(text, maxW);
+            float textTop = rowTop + (rh - tm.height) * 0.5f;
+            y = textTop + lineH * 0.5f;
+        }
+        lay->Release();
+    }
+    return y;
+}
 void App::rebuildHits() {
     m_w = g_gfx.clientW();
     m_h = g_gfx.clientH();
@@ -838,7 +856,7 @@ void App::render() {
             for (auto& f : m_fades) if (f.pi == (int)pi && f.ti == (int)ti) { fading = true; fa = f.alpha; fo = f.off; break; }
             float rh = rowHForTodo((int)pi, (int)ti, textRightRow - textXRow);
             if (fading) {
-                float cy = y + rh / 2.0f;
+                float cy = todoCircleY(proj.todos[ti].text, y, textRightRow - textXRow);
                 float sy = cTop + y - scrollOff + fo;
                 D2D1_COLOR_F cc = D2D1::ColorF(C::ACCENT.r, C::ACCENT.g, C::ACCENT.b, fa);
                 g.drawEllipse(cxRow, cy + (cTop - scrollOff) + fo, AppC::CIRCLE_R, AppC::CIRCLE_R, cc, 1.8f);
@@ -851,7 +869,10 @@ void App::render() {
                 continue;
             }
             float rowTop = y;
-            float cy = rowTop + rh / 2.0f;
+            std::wstring dispText = proj.todos[ti].text;
+            if (m_editMode == ED_EDIT_TODO && m_editPi == (int)pi && m_editTi == (int)ti)
+                dispText = m_editText + m_compositionText;
+            float cy = todoCircleY(dispText, rowTop, textRightRow - textXRow);
             float sy = cTop + rowTop - scrollOff;
             bool hov = (m_hovCircPi == (int)pi && m_hovCircTi == (int)ti);
             D2D1_COLOR_F cc = hov ? lerpColor(C::CIRCLE, C::ACCENT, m_circT) : C::CIRCLE;
