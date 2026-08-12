@@ -32,3 +32,4 @@ git rm --cached analyze.ps1 clickclose.ps1 grid.ps1 resizetest.ps1 screenshot.ps
 
 # 运行时数据
 history.json
+history.html
