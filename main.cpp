@@ -4,6 +4,7 @@
 #include <windowsx.h>
 #include <mmsystem.h>
 #include <imm.h>
+#include <shellapi.h>
 #include <cstdarg>
 #include "gfx.h"
 #include "app.h"
@@ -17,8 +18,31 @@
 
 static const wchar_t* kClass = L"ToDoWell2Class";
 static UINT_PTR kTimer = 1;
+static const UINT kTrayMsg = WM_APP + 1;
+static const UINT kTrayId = 1;
+static const UINT kMenuSettings = 1001;
+static const UINT kMenuExit = 1002;
 static MMRESULT g_mmTimer = 0;
 static HWND g_timerHwnd = nullptr;
+
+static void AddTrayIcon(HWND hwnd) {
+    NOTIFYICONDATAW nid = {};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = hwnd;
+    nid.uID = kTrayId;
+    nid.uFlags = NIF_MESSAGE | NIF_ICON | NIF_TIP;
+    nid.uCallbackMessage = kTrayMsg;
+    nid.hIcon = LoadIconW(GetModuleHandleW(nullptr), MAKEINTRESOURCEW(IDI_APP));
+    wcscpy_s(nid.szTip, L"ToDoWell");
+    Shell_NotifyIconW(NIM_ADD, &nid);
+}
+static void RemoveTrayIcon(HWND hwnd) {
+    NOTIFYICONDATAW nid = {};
+    nid.cbSize = sizeof(nid);
+    nid.hWnd = hwnd;
+    nid.uID = kTrayId;
+    Shell_NotifyIconW(NIM_DELETE, &nid);
+}
 
 static void CALLBACK mmTimerCb(UINT, UINT, DWORD_PTR, DWORD_PTR, DWORD_PTR) {
     if (g_timerHwnd) PostMessageW(g_timerHwnd, WM_TIMER, kTimer, 0);
@@ -79,6 +103,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_gfx.init(hwnd);
             g_app = new App();
             g_app->create(hwnd);
+            AddTrayIcon(hwnd);
             ApplyRoundCorners(hwnd);
             QueryPerformanceFrequency(&g_qpfFreq);
             QueryPerformanceCounter(&g_qpfLast);
@@ -202,7 +227,30 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             return 0;
         case WM_IME_NOTIFY:
             return 0;
+        case kTrayMsg: {
+            switch (LOWORD(lp)) {
+                case WM_RBUTTONUP: {
+                    SetForegroundWindow(hwnd);
+                    HMENU menu = CreatePopupMenu();
+                    AppendMenuW(menu, MF_STRING, kMenuSettings, L"\u8bbe\u7f6e");
+                    AppendMenuW(menu, MF_STRING, kMenuExit, L"\u9000\u51fa");
+                    POINT pt;
+                    GetCursorPos(&pt);
+                    UINT cmd = TrackPopupMenu(menu, TPM_RIGHTBUTTON | TPM_RETURNCMD, pt.x, pt.y, 0, hwnd, nullptr);
+                    DestroyMenu(menu);
+                    PostMessageW(hwnd, WM_NULL, 0, 0);
+                    if (cmd == kMenuSettings && g_app) g_app->showFromTray(true);
+                    else if (cmd == kMenuExit && g_app) g_app->exitFromTray();
+                    return 0;
+                }
+                case WM_LBUTTONUP:
+                    if (g_app) g_app->showFromTray(false);
+                    return 0;
+            }
+            return 0;
+        }
         case WM_DESTROY: {
+            RemoveTrayIcon(hwnd);
             if (g_app) { g_app->destroy(); delete g_app; g_app = nullptr; }
             if (g_mmTimer) { timeKillEvent(g_mmTimer); g_mmTimer = 0; }
             timeEndPeriod(1);
@@ -238,7 +286,7 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
 
     int pw = CalcWindowW(), ph = CalcWindowH();
     HWND hwnd = CreateWindowExW(
-        WS_EX_APPWINDOW,
+        WS_EX_TOOLWINDOW,
         kClass, L"ToDoWell",
         WS_POPUP | WS_THICKFRAME | WS_CLIPCHILDREN | WS_VISIBLE,
         0, 0, pw, ph,

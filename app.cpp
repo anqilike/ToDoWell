@@ -50,6 +50,15 @@ void App::requestClose() {
     m_closeFrames = 0;
     requestRedraw();
 }
+void App::showFromTray(bool openSettingsPanel) {
+    ShowWindow(m_hwnd, SW_SHOW);
+    SetForegroundWindow(m_hwnd);
+    if (openSettingsPanel && !m_settings) openSettings();
+    requestRedraw();
+}
+void App::exitFromTray() {
+    requestClose();
+}
 bool App::animating() const {
     if (m_closing) return true;
     if (m_snapping) return true;

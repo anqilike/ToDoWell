@@ -65,6 +65,8 @@ public:
     void onCompositionEnd();
     void hideImeWindows();
     void refreshImeMode();
+    void showFromTray(bool openSettings);
+    void exitFromTray();
     HWND hwnd() const { return m_hwnd; }
     HWND editHwnd() const { return m_edit; }
 
