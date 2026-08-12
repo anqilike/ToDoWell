@@ -21,6 +21,8 @@ static WNDPROC g_editOldProc = nullptr;
 static HFONT g_fontTodo = nullptr;
 static HFONT g_fontProj = nullptr;
 static HBRUSH g_whiteBrush = nullptr;
+// 版权署名：公开版为 anqilike；编译内部版时把这里改为 5014 即可全局生效。
+static const wchar_t* kCopyright = L"\u7248\u6743\u6240\u6709@\u5929\u624d\u7684anqilike";
 
 App* g_app = nullptr;
 
@@ -506,22 +508,25 @@ static std::wstring HtmlEsc(const std::wstring& s) {
 void App::openHistory() {
     auto items = load_history();
     std::wstring h;
+    std::wstring prefix = m_cfg.title_prefix.empty() ? L"\u4f60\u597d" : m_cfg.title_prefix;
     h += L"<!DOCTYPE html><html lang=\"zh-CN\"><head><meta charset=\"utf-8\">";
     h += L"<meta name=\"viewport\" content=\"width=device-width, initial-scale=1\">";
-    h += L"<title>ToDoWell \u5386\u53f2\u4ee3\u529e\u4efb\u52a1</title><style>";
+    h += L"<title>" + HtmlEsc(prefix) + L"\uff0c\u4f60\u7684\u5386\u53f2\u4ee3\u529e\u4efb\u52a1</title>";
+    h += L"<meta http-equiv=\"Cache-Control\" content=\"no-cache\"><meta http-equiv=\"Pragma\" content=\"no-cache\"><style>";
     h += L"body{font-family:'Microsoft YaHei',sans-serif;background:#f5f5f7;color:#1d1d1f;margin:0;padding:24px;}";
     h += L".wrap{max-width:760px;margin:0 auto;}h1{font-size:22px;margin:0;}";
     h += L".sum{color:#86868b;font-size:13px;margin:8px 0 18px;}";
     h += L".card{background:#fff;border-radius:12px;padding:16px 18px;margin-bottom:14px;box-shadow:0 1px 4px rgba(0,0,0,.06);}";
     h += L".proj{font-size:16px;font-weight:bold;margin:0 0 10px;}";
     h += L"table{width:100%;border-collapse:collapse;font-size:13px;}";
-    h += L"th,td{text-align:left;padding:7px 8px;border-bottom:1px solid #e5e5e5;vertical-align:top;}";
+    h += L"th,td{text-align:left;padding:7px 20px;border-bottom:1px solid #e5e5e5;vertical-align:top;}";
     h += L"th{color:#86868b;font-weight:normal;font-size:12px;}";
     h += L".dur{color:#0066cc;white-space:nowrap;}";
+    h += L".tm{white-space:nowrap;}";
     h += L".empty{color:#86868b;padding:40px 0;text-align:center;}";
     h += L"footer{color:#aaa;font-size:12px;text-align:center;margin-top:24px;}";
     h += L"</style></head><body><div class=\"wrap\">";
-    h += L"<h1>ToDoWell \u5386\u53f2\u4ee3\u529e\u4efb\u52a1</h1>";
+    h += L"<h1>" + HtmlEsc(prefix) + L"\uff0c\u4f60\u7684\u5386\u53f2\u4ee3\u529e\u4efb\u52a1</h1>";
     h += L"<div class=\"sum\">\u5171\u5b8c\u6210 " + std::to_wstring((int)items.size()) + L" \u6761\u4efb\u52a1</div>";
     if (items.empty()) {
         h += L"<div class=\"empty\">\u8fd8\u6ca1\u6709\u5b8c\u6210\u8fc7\u4efb\u52a1\uff0c\u70b9\u51fb\u5f85\u529e\u524d\u7684\u5706\u5708\u5b8c\u6210\u5373\u53ef\u8bb0\u5f55\u5230\u8fd9\u91cc\u3002</div>";
@@ -537,14 +542,14 @@ void App::openHistory() {
             h += L"<tr><th>\u4efb\u52a1</th><th>\u5efa\u7acb\u65f6\u95f4</th><th>\u5b8c\u6210\u65f6\u95f4</th><th>\u8017\u65f6</th></tr>";
             for (auto& it : g.second) {
                 h += L"<tr><td>" + HtmlEsc(it.text) + L"</td>";
-                h += L"<td>" + HtmlEsc(iso_to_display(it.created)) + L"</td>";
-                h += L"<td>" + HtmlEsc(iso_to_display(it.completed)) + L"</td>";
+                h += L"<td class=\"tm\">" + HtmlEsc(iso_to_display(it.created)) + L"</td>";
+                h += L"<td class=\"tm\">" + HtmlEsc(iso_to_display(it.completed)) + L"</td>";
                 h += L"<td class=\"dur\">" + HtmlEsc(duration_text(it.created, it.completed)) + L"</td></tr>";
             }
             h += L"</table></div>";
         }
     }
-    h += L"<footer>\u7531 ToDoWell \u751f\u6210</footer></div></body></html>";
+    h += L"<footer>\u7531 ToDoWell \u751f\u6210 \u00b7 " + HtmlEsc(kCopyright) + L"</footer></div></body></html>";
     if (write_utf8_file(L"history.html", h)) {
         ShellExecuteW(m_hwnd, L"open", (exe_dir() + L"history.html").c_str(), nullptr, nullptr, SW_SHOWNORMAL);
     } else {
@@ -1039,7 +1044,7 @@ void App::render() {
         g.drawText(L"\u5173\u4e8e ToDoWell", D2D1::RectF(dlgX + 16, aboutY, dlgX + dlgW - 16, aboutY + 18), F_HINT, aboutCol);
         g.rt->PopAxisAlignedClip();
         g.drawText(L"\u7248\u672c 2.5.6", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
-        g.drawText(L"\u7248\u6743\u6240\u6709@\u5929\u624d\u7684anqilike", D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
         float posBottom = aboutY + 18.0f;
         // Content height must be independent of the current scroll offset;
@@ -1081,7 +1086,7 @@ void App::render() {
         g.rt->PopAxisAlignedClip();
         m_aboutContentH = (ty - sy) - dlgY + 10.0f;
         g.drawText(L"\u7248\u672c 2.5.6", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
-        g.drawText(L"\u7248\u6743\u6240\u6709@\u5929\u624d\u7684anqilike", D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
     }
 
     // App-rendered IME candidate list (the system IME window is hidden).
