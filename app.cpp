@@ -479,7 +479,19 @@ void App::addProjectCommit(const std::wstring& name) {
 }
 void App::focusNewTodo(int pi) {
     beginEdit(ED_NEW_TODO, pi, -1, L"");
-    m_scrollTarget = 1e9f;
+    // 只滚动到新任务行刚好可见，而不是跳到整页最底端。
+    float viewH = m_h - AppC::TITLE_H - AppC::BOT_H;
+    float target = m_scroll;
+    for (auto& hit : m_hits) {
+        if (hit.type == H_NEWTODO && hit.pi == pi) {
+            float top = hit.rc.top;
+            float bot = hit.rc.bottom;
+            if (bot > m_scroll + viewH - 8.0f) target = bot - viewH + 8.0f;
+            else if (top < m_scroll + 8.0f) target = top - 8.0f;
+            break;
+        }
+    }
+    m_scrollTarget = target;
     clampScroll();
 }
 void App::completeTodo(int pi, int ti) {
@@ -1078,7 +1090,7 @@ void App::render() {
                    D2D1::ColorF(C::TITLE_FG.r, C::TITLE_FG.g, C::TITLE_FG.b, oa),
                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         g.rt->PopAxisAlignedClip();
-        g.drawText(L"\u7248\u672c 2.5.7", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.8", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
         float posBottom = noteY + noteH;
@@ -1120,7 +1132,7 @@ void App::render() {
         }
         g.rt->PopAxisAlignedClip();
         m_aboutContentH = (ty - sy) - dlgY + 10.0f;
-        g.drawText(L"\u7248\u672c 2.5.7", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.8", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
     }
 
