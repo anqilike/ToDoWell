@@ -52,9 +52,19 @@ void App::requestClose() {
 }
 void App::showFromTray(bool openSettingsPanel) {
     ShowWindow(m_hwnd, SW_SHOW);
+    bringToFront();
     SetForegroundWindow(m_hwnd);
     if (openSettingsPanel && !m_settings) openSettings();
     requestRedraw();
+}
+void App::bringToFront() {
+    // Windows 10 can leave a WS_EX_TOOLWINDOW (no taskbar button) below the
+    // desktop icon layer (SHELLDLL_DefView) when the window is created while
+    // Explorer is still building the desktop, e.g. at auto-start. Moving to
+    // TOPMOST and immediately back to NOTOPMOST lifts it above the icon layer
+    // without keeping it always-on-top.
+    SetWindowPos(m_hwnd, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    SetWindowPos(m_hwnd, HWND_NOTOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 void App::exitFromTray() {
     requestClose();
@@ -275,6 +285,15 @@ void App::beginEdit(EditMode mode, int pi, int ti, const std::wstring& initial) 
     positionEdit();
     if (m_edit) { SetFocus(m_edit); }
     requestRedraw();
+}
+void App::startEdit(EditMode mode, int pi, int ti, const std::wstring& initial) {
+    // If a different field is being edited, commit it first so typed changes
+    // are never silently discarded when the user clicks another editable row.
+    if (m_editMode != ED_NONE && m_editMode != ED_PREF_PREFIX &&
+        !(m_editMode == mode && m_editPi == pi && m_editTi == ti)) {
+        commitEdit();
+    }
+    beginEdit(mode, pi, ti, initial);
 }
 void App::endEdit(bool applyFocus) {
     m_reentering = true;
@@ -913,6 +932,9 @@ void App::render() {
                 g.drawText(proj.todos[ti].text, D2D1::RectF(textXRow, sy, textRightRow, sy + rh), F_TODO, C::TEXT,
                            DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
             } else {
+                // Editing state: full-width accent underline, matching the
+                // project title and new-task rows so the edit affordance is clear.
+                g.drawLine(textXRow, sy + rh - 2, textRightRow, sy + rh - 2, C::ACCENT, 1.5f);
                 std::wstring dtext = m_editText + m_compositionText;
                 g.drawText(dtext, D2D1::RectF(textXRow, sy, textRightRow, sy + rh), F_TODO, C::TEXT,
                            DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -1090,7 +1112,7 @@ void App::render() {
                    D2D1::ColorF(C::TITLE_FG.r, C::TITLE_FG.g, C::TITLE_FG.b, oa),
                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         g.rt->PopAxisAlignedClip();
-        g.drawText(L"\u7248\u672c 2.5.8", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.9", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
         float posBottom = noteY + noteH;
@@ -1132,7 +1154,7 @@ void App::render() {
         }
         g.rt->PopAxisAlignedClip();
         m_aboutContentH = (ty - sy) - dlgY + 10.0f;
-        g.drawText(L"\u7248\u672c 2.5.8", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.9", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
     }
 
@@ -1178,6 +1200,16 @@ void App::render() {
     if (g.rt->EndDraw() == D2DERR_RECREATE_TARGET) { g_gfx.recreate(m_hwnd); }
 }
 void App::tick(float dt) {
+    // One-time fix shortly after launch: Explorer may build the desktop icon
+    // layer after this window exists (typical with auto-start), which on Win10
+    // can leave the tool window behind the icons. Re-raise once it has settled.
+    if (!m_startupRaised) {
+        m_startupT += dt;
+        if (m_startupT >= 2.0f) {
+            m_startupRaised = true;
+            if (!m_closing) bringToFront();
+        }
+    }
     if (m_editMode != ED_NONE) {
         m_imeHideTimer += dt;
         if (m_imeHideTimer >= 0.25f) {
@@ -1554,7 +1586,14 @@ void App::onLButtonDblClk(float x, float y) {
         rebuildHits();
         for (auto& h : m_hits) {
             if (contentY >= h.rc.top && contentY <= h.rc.bottom && x >= h.rc.left && x <= h.rc.right) {
-                if (h.type == H_PROJ_NAME) { beginEdit(ED_EDIT_PROJECT, h.pi, -1, m_projects[h.pi].name); return; }
+                if (h.type == H_PROJ_NAME) {
+                    startEdit(ED_EDIT_PROJECT, h.pi, -1, m_projects[h.pi].name);
+                    return;
+                }
+                if (h.type == H_TODO_TEXT) {
+                    startEdit(ED_EDIT_TODO, h.pi, h.ti, m_projects[h.pi].todos[h.ti].text);
+                    return;
+                }
             }
         }
     }
@@ -1668,8 +1707,8 @@ void App::onLButtonDown(float x, float y) {
     }
     if (y > H - AppC::BOT_H) {
         if (inRect(x, y, D2D1::RectF(8, H - AppC::BOT_H, 44, H))) {
+            startEdit(ED_ADD_PROJECT, -1, -1, L"");
             m_addingProject = true;
-            beginEdit(ED_ADD_PROJECT, -1, -1, L"");
             m_scrollTarget = 1e9f; clampScroll();
             return;
         }
@@ -1685,8 +1724,8 @@ void App::onLButtonDown(float x, float y) {
             if (contentY >= h.rc.top && contentY <= h.rc.bottom && x >= h.rc.left && x <= h.rc.right) {
                 switch (h.type) {
                     case H_TODO_CIRCLE: completeTodo(h.pi, h.ti); m_suppressCircleHover = true; m_hovCircPi = -1; m_hovCircTi = -2; return;
-                    case H_TODO_TEXT: beginEdit(ED_EDIT_TODO, h.pi, h.ti, m_projects[h.pi].todos[h.ti].text); return;
-                    case H_NEWTODO: beginEdit(ED_NEW_TODO, h.pi, -1, L""); return;
+                    case H_TODO_TEXT: startEdit(ED_EDIT_TODO, h.pi, h.ti, m_projects[h.pi].todos[h.ti].text); return;
+                    case H_NEWTODO: startEdit(ED_NEW_TODO, h.pi, -1, L""); return;
                     case H_PROJ_DEL: delProject(h.pi); return;
                     default: return;
                 }

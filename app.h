@@ -67,6 +67,7 @@ public:
     void refreshImeMode();
     void showFromTray(bool openSettings);
     void exitFromTray();
+    void bringToFront();
     HWND hwnd() const { return m_hwnd; }
     HWND editHwnd() const { return m_edit; }
 
@@ -116,6 +117,8 @@ private:
     float m_cursorBlink = 0; // cursor blink timer
     float m_closeAnim = 0; // 0..1 close animation progress
     int m_closeFrames = 0;
+    float m_startupT = 0;      // seconds since startup, for one-time z-order fix
+    bool m_startupRaised = false;
     bool m_snapping = false;
     bool m_snappedToTarget = false;
     float m_snapScale = 1.0f;
@@ -154,6 +157,7 @@ int m_hoverAdd = 0; float m_addT = 0;
     float todoCircleY(const std::wstring& text, float rowTop, float maxW); // first-line circle center
     void openHistory();
     void beginEdit(EditMode mode, int pi, int ti, const std::wstring& initial);
+    void startEdit(EditMode mode, int pi, int ti, const std::wstring& initial);
     void endEdit(bool applyFocus);
     void ensureEditCreated();
     std::wstring editGetText();
