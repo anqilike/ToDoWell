@@ -205,7 +205,10 @@ LRESULT CALLBACK EditSubproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     } else if (msg == WM_PRINTCLIENT) {
         return 0;
     } else if (msg == WM_IME_SETCONTEXT) {
-        LRESULT res = CallWindowProcW(g_editOldProc, h, msg, wp, lp);
+        // Hide the IME's own composition/guideline windows; the app renders
+        // its own input UI. Candidate data is kept so the built-in popup works.
+        LPARAM flags = lp & ~(ISC_SHOWUICOMPOSITIONWINDOW | ISC_SHOWUIGUIDELINE);
+        LRESULT res = CallWindowProcW(g_editOldProc, h, msg, wp, flags);
         if (g_app) g_app->hideImeWindows();
         return res;
     } else if (msg == WM_IME_STARTCOMPOSITION) {
@@ -310,18 +313,45 @@ void App::endEdit(bool applyFocus) {
     }
     requestRedraw();
 }
+float App::editUnderlineDip() const {
+    if (m_editMode == ED_PREF_PREFIX || m_editRectDip.right <= m_editRectDip.left)
+        return -1.0f;
+    switch (m_editMode) {
+        case ED_EDIT_PROJECT: return m_editRectDip.bottom - 3.0f; // BADGE_H row
+        case ED_ADD_PROJECT:  return m_editRectDip.bottom;        // 30px new-project line
+        default:              return m_editRectDip.bottom - 2.0f; // todo rows
+    }
+}
+int App::editTextHeightPx() const {
+    if (!m_edit) return toPx(AppC::ROW_H);
+    HFONT f = (m_editMode == ED_EDIT_PROJECT || m_editMode == ED_ADD_PROJECT)
+              ? g_fontProj : g_fontTodo;
+    HDC hdc = GetDC(m_edit);
+    if (!hdc) return toPx(AppC::ROW_H);
+    HGDIOBJ old = SelectObject(hdc, f);
+    TEXTMETRICW tm = {};
+    int h = toPx(AppC::ROW_H);
+    if (GetTextMetricsW(hdc, &tm) && tm.tmHeight > 0) h = (int)tm.tmHeight;
+    SelectObject(hdc, old);
+    ReleaseDC(m_edit, hdc);
+    return h;
+}
 void App::positionEdit() {
     if (!m_edit || m_editMode == ED_NONE) return;
     if (m_editRectDip.left == 0 && m_editRectDip.right == 0) return;
-    float editTop = m_editRectDip.top;
-    if (m_editMode != ED_PREF_PREFIX) {
-        editTop += AppC::TITLE_H - m_scroll;
-    }
-    // Real, visible input control aligned with the row: TSF/IME positions the
-    // composition/candidate UI natively at the caret inside this control, and
-    // the control paints its own text (styled to match the app).
+    // Keep the hidden EDIT's text bottom on the visible underline so the
+    // TSF caret/IME geometry uses the same line as the UI.
     float editW = std::max(40.0f, m_editRectDip.right - m_editRectDip.left);
-    float editH = std::max(AppC::ROW_H, m_editRectDip.bottom - m_editRectDip.top);
+    float editTop;
+    float editH;
+    if (m_editMode == ED_PREF_PREFIX) {
+        editTop = m_editRectDip.top;
+        editH = std::max(AppC::ROW_H, m_editRectDip.bottom - m_editRectDip.top);
+    } else {
+        float underline = editUnderlineDip() + AppC::TITLE_H - m_scroll;
+        editH = toDip(editTextHeightPx());
+        editTop = underline - editH;
+    }
     int ex = toPx(m_editRectDip.left), ey = toPx(editTop);
     int ew = toPx(editW), eh = toPx(editH);
     // Avoid repositioning every tick (1ms timer): a SetWindowPos storm disturbs
