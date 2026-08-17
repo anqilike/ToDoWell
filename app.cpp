@@ -333,6 +333,88 @@ void App::positionEdit() {
     ShowWindow(m_edit, SW_SHOWNOACTIVATE);
     HideCaret(m_edit); // D2D draws the visible caret
 }
+// Returns caret geometry relative to a text layout that matches how the text is
+// drawn (same width/height, vertically centered): x from the layout's left edge
+// and the top/height of the caret's line.
+static bool editCaretGeometry(const std::wstring& text, int pos, float maxW, float maxH, FontId fid,
+                              float& relX, float& relTop, float& relH) {
+    if (text.empty() || maxW <= 0 || maxH <= 0) return false;
+    IDWriteTextFormat* fmt = g_gfx.font(fid);
+    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    IDWriteTextLayout* lay = nullptr;
+    if (FAILED(g_gfx.dw->CreateTextLayout(text.c_str(), (UINT32)text.size(),
+                                          fmt, maxW, maxH, &lay)) || !lay)
+        return false;
+    DWRITE_TEXT_METRICS tm = {};
+    DWRITE_HIT_TEST_METRICS htm = {};
+    FLOAT hx = 0, hy = 0;
+    bool ok = SUCCEEDED(lay->GetMetrics(&tm)) && tm.height > 0 &&
+              SUCCEEDED(lay->HitTestTextPosition((UINT32)std::min(pos, (int)text.size()),
+                                                 FALSE, &hx, &hy, &htm)) &&
+              htm.height > 0;
+    if (ok) {
+        relX = hx; relTop = htm.top; relH = htm.height;
+    }
+    lay->Release();
+    return ok;
+}
+// Converts a point inside the text layout (relative to its top-left) to a
+// character index, matching how DirectWrite places the caret on click.
+static int editIndexFromPoint(const std::wstring& text, float x, float y, float maxW, float maxH, FontId fid) {
+    if (text.empty() || maxW <= 0 || maxH <= 0) return 0;
+    IDWriteTextFormat* fmt = g_gfx.font(fid);
+    fmt->SetTextAlignment(DWRITE_TEXT_ALIGNMENT_LEADING);
+    fmt->SetParagraphAlignment(DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    IDWriteTextLayout* lay = nullptr;
+    if (FAILED(g_gfx.dw->CreateTextLayout(text.c_str(), (UINT32)text.size(),
+                                          fmt, maxW, maxH, &lay)) || !lay)
+        return 0;
+    BOOL trailing = FALSE, inside = FALSE;
+    DWRITE_HIT_TEST_METRICS htm = {};
+    HRESULT hr = lay->HitTestPoint(x, y, &trailing, &inside, &htm);
+    lay->Release();
+    if (FAILED(hr)) return 0;
+    int pos = (int)htm.textPosition;
+    if (trailing) ++pos;
+    if (pos < 0) pos = 0;
+    if (pos > (int)text.size()) pos = (int)text.size();
+    return pos;
+}
+int App::editCaretPos() const {
+    if (!m_edit) return (int)m_editText.size();
+    DWORD selStart = 0, selEnd = 0;
+    SendMessageW(m_edit, EM_GETSEL, (WPARAM)&selStart, (LPARAM)&selEnd);
+    return (int)selEnd;
+}
+void App::setEditCaretFromPoint(float x, float y) {
+    if (!m_edit || m_editMode == ED_NONE) return;
+    if (!m_compositionText.empty()) return; // IME owns the caret while composing
+    FontId fid = (m_editMode == ED_EDIT_PROJECT || m_editMode == ED_ADD_PROJECT) ? F_PROJ_NAME : F_TODO;
+    float maxW = m_editRectDip.right - m_editRectDip.left;
+    float maxH = m_editRectDip.bottom - m_editRectDip.top;
+    if (maxW <= 0 || maxH <= 0) return;
+    int pos = editIndexFromPoint(m_editText, x - m_editRectDip.left, y - m_editRectDip.top, maxW, maxH, fid);
+    SendMessageW(m_edit, EM_SETSEL, (WPARAM)pos, (LPARAM)pos);
+    m_cursorBlink = 0;
+    requestRedraw();
+}
+void App::drawEditCaret(Gfx& g, FontId fid, const std::wstring& text,
+                        float left, float top, float width, float height) {
+    if (((int)(m_cursorBlink * 2) % 2) != 0) return; // blink off
+    float cx = left + g.measureTextW(text, fid) + 1;   // fallback: end of text
+    float cy = top + 2;
+    float ch = height - 4;
+    if (m_compositionText.empty()) {
+        float relX = 0, relTop = 0, relH = 0;
+        if (editCaretGeometry(text, editCaretPos(), width, height, fid, relX, relTop, relH)) {
+            cx = left + relX;
+            cy = top + relTop;
+            ch = relH;
+        }
+    }
+    g.drawLine(cx, cy + 1, cx, cy + ch - 1, C::ACCENT, 1.5f);
+}
 // The system IME (Microsoft Pinyin compatibility mode) draws its composition
 // and candidate list in its own floating window. That window is hidden, so
 // this polls the IME state and the app renders the pinyin and candidates
@@ -881,9 +963,7 @@ void App::render() {
             // Full-width underline, matching the todo row editing style.
             g.drawLine(nameX, screenHy + AppC::BADGE_H - 1, nameRight, screenHy + AppC::BADGE_H - 1, C::ACCENT, 1.5f);
             g.drawText(dtext, D2D1::RectF(nameX, screenHy, nameRight, screenHy + AppC::BADGE_H), F_PROJ_NAME, C::TEXT);
-            float tw2 = g.measureTextW(m_editText, F_PROJ_NAME);
-            float cw = g.measureTextW(m_compositionText, F_PROJ_NAME);
-            if (((int)(m_cursorBlink * 2) % 2) == 0) g.drawLine(nameX + tw2 + cw + 1, screenHy + 2, nameX + tw2 + cw + 1, screenHy + AppC::BADGE_H - 2, C::ACCENT, 1.5f);
+            drawEditCaret(g, F_PROJ_NAME, dtext, nameX, screenHy, nameRight - nameX, AppC::BADGE_H);
         } else {
             g.drawText(proj.name, D2D1::RectF(nameX, screenHy, nameRight, screenHy + AppC::BADGE_H), F_PROJ_NAME, C::TEXT);
         }
@@ -938,9 +1018,7 @@ void App::render() {
                 std::wstring dtext = m_editText + m_compositionText;
                 g.drawText(dtext, D2D1::RectF(textXRow, sy, textRightRow, sy + rh), F_TODO, C::TEXT,
                            DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-                float tw2 = g.measureTextW(m_editText, F_TODO);
-                float cw = g.measureTextW(m_compositionText, F_TODO);
-                if (((int)(m_cursorBlink * 2) % 2) == 0) g.drawLine(textXRow + tw2 + cw + 1, sy + 4, textXRow + tw2 + cw + 1, sy + rh - 4, C::ACCENT, 1.5f);
+                drawEditCaret(g, F_TODO, dtext, textXRow, sy, textRightRow - textXRow, rh);
             }
             y += rh;
         }
@@ -954,9 +1032,7 @@ void App::render() {
                 std::wstring dtext = m_editText + m_compositionText;
                 g.drawText(dtext, D2D1::RectF(textXRow, sy, textRightRow, sy + ntH), F_TODO, C::TEXT,
                            DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-                float tw2 = g.measureTextW(m_editText, F_TODO);
-                float cw = g.measureTextW(m_compositionText, F_TODO);
-                if (((int)(m_cursorBlink * 2) % 2) == 0) g.drawLine(textXRow + tw2 + cw + 1, sy + 4, textXRow + tw2 + cw + 1, sy + ntH - 4, C::ACCENT, 1.5f);
+                drawEditCaret(g, F_TODO, dtext, textXRow, sy, textRightRow - textXRow, ntH);
             }
         }
         y += ntH + 4.0f + 6.0f + AppC::CARD_GAP;
@@ -980,10 +1056,7 @@ void App::render() {
             // where the "新项目名称" placeholder is drawn.
             g.drawLine(ex, screenTop + 30, ex + ew, screenTop + 30, C::ACCENT, 1.5f);
             g.drawText(dtext, D2D1::RectF(ex, screenTop, ex + ew, screenBot), F_PROJ_NAME, C::TEXT);
-            float tw2 = g.measureTextW(m_editText, F_PROJ_NAME);
-            float cw = g.measureTextW(m_compositionText, F_PROJ_NAME);
-            bool showCursor = ((int)(m_cursorBlink * 2) % 2) == 0;
-            if (showCursor) g.drawLine(ex + tw2 + cw + 1, screenTop + 2, ex + tw2 + cw + 1, screenTop + 29, C::ACCENT, 1.5f);
+            drawEditCaret(g, F_PROJ_NAME, dtext, ex, screenTop, ew, 30.0f);
         }
     }
     g.rt->PopAxisAlignedClip();
@@ -1112,7 +1185,7 @@ void App::render() {
                    D2D1::ColorF(C::TITLE_FG.r, C::TITLE_FG.g, C::TITLE_FG.b, oa),
                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         g.rt->PopAxisAlignedClip();
-        g.drawText(L"\u7248\u672c 2.5.9", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.10", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
         float posBottom = noteY + noteH;
@@ -1154,7 +1227,7 @@ void App::render() {
         }
         g.rt->PopAxisAlignedClip();
         m_aboutContentH = (ty - sy) - dlgY + 10.0f;
-        g.drawText(L"\u7248\u672c 2.5.9", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.10", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
     }
 
@@ -1587,11 +1660,17 @@ void App::onLButtonDblClk(float x, float y) {
         for (auto& h : m_hits) {
             if (contentY >= h.rc.top && contentY <= h.rc.bottom && x >= h.rc.left && x <= h.rc.right) {
                 if (h.type == H_PROJ_NAME) {
-                    startEdit(ED_EDIT_PROJECT, h.pi, -1, m_projects[h.pi].name);
+                    if (m_editMode == ED_EDIT_PROJECT && m_editPi == h.pi)
+                        setEditCaretFromPoint(x, contentY);
+                    else
+                        startEdit(ED_EDIT_PROJECT, h.pi, -1, m_projects[h.pi].name);
                     return;
                 }
                 if (h.type == H_TODO_TEXT) {
-                    startEdit(ED_EDIT_TODO, h.pi, h.ti, m_projects[h.pi].todos[h.ti].text);
+                    if (m_editMode == ED_EDIT_TODO && m_editPi == h.pi && m_editTi == h.ti)
+                        setEditCaretFromPoint(x, contentY);
+                    else
+                        startEdit(ED_EDIT_TODO, h.pi, h.ti, m_projects[h.pi].todos[h.ti].text);
                     return;
                 }
             }
@@ -1724,9 +1803,25 @@ void App::onLButtonDown(float x, float y) {
             if (contentY >= h.rc.top && contentY <= h.rc.bottom && x >= h.rc.left && x <= h.rc.right) {
                 switch (h.type) {
                     case H_TODO_CIRCLE: completeTodo(h.pi, h.ti); m_suppressCircleHover = true; m_hovCircPi = -1; m_hovCircTi = -2; return;
-                    case H_TODO_TEXT: startEdit(ED_EDIT_TODO, h.pi, h.ti, m_projects[h.pi].todos[h.ti].text); return;
-                    case H_NEWTODO: startEdit(ED_NEW_TODO, h.pi, -1, L""); return;
+                    case H_TODO_TEXT:
+                        if (m_editMode == ED_EDIT_TODO && m_editPi == h.pi && m_editTi == h.ti) {
+                            if (m_compositionText.empty()) setEditCaretFromPoint(x, contentY);
+                            return;
+                        }
+                        startEdit(ED_EDIT_TODO, h.pi, h.ti, m_projects[h.pi].todos[h.ti].text);
+                        return;
+                    case H_NEWTODO:
+                        if (m_editMode == ED_NEW_TODO && m_editPi == h.pi) {
+                            if (m_compositionText.empty()) setEditCaretFromPoint(x, contentY);
+                            return;
+                        }
+                        startEdit(ED_NEW_TODO, h.pi, -1, L"");
+                        return;
                     case H_PROJ_DEL: delProject(h.pi); return;
+                    case H_PROJ_NAME:
+                        if (m_editMode == ED_EDIT_PROJECT && m_editPi == h.pi)
+                            setEditCaretFromPoint(x, contentY);
+                        return;
                     default: return;
                 }
             }

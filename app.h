@@ -76,6 +76,10 @@ public:
     bool isClosing() const { return m_closing; }
     bool isEditing() const { return m_editMode != ED_NONE; }
     void positionEdit();
+    int editCaretPos() const;
+    void setEditCaretFromPoint(float x, float y);
+    void drawEditCaret(Gfx& g, FontId fid, const std::wstring& text,
+                       float left, float top, float width, float height);
 
 private:
     HWND m_hwnd = nullptr;
