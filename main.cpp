@@ -136,6 +136,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
         case WM_MOVE: {
             return 0;
         }
+        case WM_CLOSE: {
+            // The titlebar X hides to the tray; only the tray menu's Exit
+            // actually closes the application.
+            if (g_app) { g_app->hideToTray(); return 0; }
+            break;
+        }
         case WM_NCCALCSIZE: {
             if (wp == TRUE) return 0;
             break;

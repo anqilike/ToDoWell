@@ -44,6 +44,11 @@ void App::clampScroll() {
 void App::saveAll() { save_projects(m_projects); save_config(m_cfg); }
 void App::requestClose() {
     if (m_closing) return;
+    if (m_hidingToTray) {
+        m_hidingToTray = false;
+        m_hideAnim = 0;
+        SetLayeredWindowAttributes(m_hwnd, 0, 255, LWA_ALPHA);
+    }
     saveAll();
     m_closing = true;
     m_closeAnim = 0;
@@ -51,10 +56,24 @@ void App::requestClose() {
     requestRedraw();
 }
 void App::showFromTray(bool openSettingsPanel) {
+    if (m_hidingToTray) {
+        m_hidingToTray = false;
+        m_hideAnim = 0;
+    }
+    SetLayeredWindowAttributes(m_hwnd, 0, 255, LWA_ALPHA);
     ShowWindow(m_hwnd, SW_SHOW);
     bringToFront();
     SetForegroundWindow(m_hwnd);
     if (openSettingsPanel && !m_settings) openSettings();
+    requestRedraw();
+}
+void App::hideToTray() {
+    if (m_closing || m_hidingToTray) return;
+    // Commit/cancel the current edit so typed text is never silently lost.
+    if (m_editMode != ED_NONE) onEditKillFocus();
+    saveAll();
+    m_hidingToTray = true;
+    m_hideAnim = 0;
     requestRedraw();
 }
 void App::bringToFront() {
@@ -71,6 +90,7 @@ void App::exitFromTray() {
 }
 bool App::animating() const {
     if (m_closing) return true;
+    if (m_hidingToTray) return true;
     if (m_snapping) return true;
     // Keep repainting while the overlay shade fades in OR out, so the main
     // page never gets stuck dimmed after closing settings/about.
@@ -186,8 +206,14 @@ LRESULT CALLBACK EditSubproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
     if (msg == WM_KEYDOWN) {
         if (wp == VK_RETURN) { if (g_app) g_app->onEditReturn(); return 0; }
         if (wp == VK_ESCAPE) { if (g_app) g_app->onEditEscape(); return 0; }
+        LRESULT res = CallWindowProcW(g_editOldProc, h, msg, wp, lp);
+        if (g_app) g_app->onEditChanged(true);
+        return res;
     } else if (msg == WM_CHAR) {
         if (wp == VK_RETURN || wp == VK_ESCAPE) return 0;
+        LRESULT res = CallWindowProcW(g_editOldProc, h, msg, wp, lp);
+        if (g_app) g_app->onEditChanged(true);
+        return res;
     } else if (msg == WM_GETDLGCODE) {
         return DLGC_WANTALLKEYS;
     } else if (msg == WM_KILLFOCUS) {
@@ -241,10 +267,14 @@ LRESULT CALLBACK EditSubproc(HWND h, UINT msg, WPARAM wp, LPARAM lp) {
                 ImmReleaseContext(h, himc);
             }
         }
-        return CallWindowProcW(g_editOldProc, h, msg, wp, lp);
+        LRESULT res = CallWindowProcW(g_editOldProc, h, msg, wp, lp);
+        if (g_app) g_app->onEditChanged(false);
+        return res;
     } else if (msg == WM_IME_ENDCOMPOSITION) {
         if (g_app) g_app->onCompositionEnd();
-        return CallWindowProcW(g_editOldProc, h, msg, wp, lp);
+        LRESULT res = CallWindowProcW(g_editOldProc, h, msg, wp, lp);
+        if (g_app) g_app->onEditChanged(false);
+        return res;
     } else if (msg == WM_IME_NOTIFY) {
         return CallWindowProcW(g_editOldProc, h, msg, wp, lp);
     }
@@ -262,6 +292,27 @@ void App::editSetText(const std::wstring& s) {
     SetWindowTextW(m_edit, s.c_str());
     int len = (int)s.size();
     SendMessageW(m_edit, EM_SETSEL, len, len); // caret at end, no selection
+}
+void App::onEditChanged(bool userKey) {
+    if (m_editMode == ED_NONE || !m_edit || !m_compositionText.empty()) return;
+    std::wstring cur = editGetText();
+    if (cur != m_editText) {
+        m_editText = cur;
+        m_cursorBlink = 0;
+        int cp = editCaretPos();
+        if (!userKey && cp == 0 && !cur.empty()) cp = (int)cur.size();
+        m_lastCaretPos = cp;
+        requestRedraw();
+        return;
+    }
+    int cp = editCaretPos();
+    if (!userKey && cp == 0 && !cur.empty() && m_lastCaretPos > 0)
+        cp = m_lastCaretPos;
+    if (cp != m_lastCaretPos) {
+        m_lastCaretPos = cp;
+        m_cursorBlink = 0;
+        requestRedraw();
+    }
 }
 void App::beginEdit(EditMode mode, int pi, int ti, const std::wstring& initial) {
     m_editMode = mode; m_editPi = pi; m_editTi = ti;
@@ -281,6 +332,7 @@ void App::beginEdit(EditMode mode, int pi, int ti, const std::wstring& initial) 
     }
     ensureEditCreated();
     editSetText(initial);
+    m_lastCaretPos = (int)initial.size();
     if (m_edit) {
         HFONT f = (mode == ED_EDIT_PROJECT || mode == ED_ADD_PROJECT) ? g_fontProj : g_fontTodo;
         SendMessageW(m_edit, WM_SETFONT, (WPARAM)f, TRUE);
@@ -303,6 +355,7 @@ void App::endEdit(bool applyFocus) {
     m_editMode = ED_NONE; m_editPi = -1; m_editTi = -1;
     m_compositionText.clear();
     m_lastEditLayout.clear();
+    m_lastCaretPos = -1;
     m_cands.clear();
     m_candSel = -1;
     m_reentering = false;
@@ -426,6 +479,7 @@ void App::setEditCaretFromPoint(float x, float y) {
     if (maxW <= 0 || maxH <= 0) return;
     int pos = editIndexFromPoint(m_editText, x - m_editRectDip.left, y - m_editRectDip.top, maxW, maxH, fid);
     SendMessageW(m_edit, EM_SETSEL, (WPARAM)pos, (LPARAM)pos);
+    m_lastCaretPos = pos;
     m_cursorBlink = 0;
     requestRedraw();
 }
@@ -435,13 +489,20 @@ void App::drawEditCaret(Gfx& g, FontId fid, const std::wstring& text,
     float cx = left + g.measureTextW(text, fid) + 1;   // fallback: end of text
     float cy = top + 2;
     float ch = height - 4;
+    int caretPos = (int)text.size();
     if (m_compositionText.empty()) {
-        float relX = 0, relTop = 0, relH = 0;
-        if (editCaretGeometry(text, editCaretPos(), width, height, fid, relX, relTop, relH)) {
-            cx = left + relX;
-            cy = top + relTop;
-            ch = relH;
-        }
+        caretPos = editCaretPos();
+        // Some IMEs momentarily reset the EDIT selection to 0 while committing
+        // text. Keep the last known position for that transient frame instead
+        // of drawing the caret at the start of the line.
+        if (caretPos == 0 && !text.empty() && m_lastCaretPos > 0)
+            caretPos = m_lastCaretPos;
+    }
+    float relX = 0, relTop = 0, relH = 0;
+    if (editCaretGeometry(text, caretPos, width, height, fid, relX, relTop, relH)) {
+        cx = left + relX;
+        cy = top + relTop;
+        ch = relH;
     }
     g.drawLine(cx, cy + 1, cx, cy + ch - 1, C::ACCENT, 1.5f);
 }
@@ -1215,7 +1276,7 @@ void App::render() {
                    D2D1::ColorF(C::TITLE_FG.r, C::TITLE_FG.g, C::TITLE_FG.b, oa),
                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         g.rt->PopAxisAlignedClip();
-        g.drawText(L"\u7248\u672c 2.5.10", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.11", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
         float posBottom = noteY + noteH;
@@ -1257,7 +1318,7 @@ void App::render() {
         }
         g.rt->PopAxisAlignedClip();
         m_aboutContentH = (ty - sy) - dlgY + 10.0f;
-        g.drawText(L"\u7248\u672c 2.5.10", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.11", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
     }
 
@@ -1341,6 +1402,17 @@ void App::tick(float dt) {
                 if (cur != m_editText) {
                     m_editText = cur;
                     m_cursorBlink = 0;
+                    int cp = editCaretPos();
+                    if (cp == 0 && !cur.empty()) cp = (int)cur.size();
+                    m_lastCaretPos = cp;
+                } else {
+                    int cp = editCaretPos();
+                    if (cp == 0 && !cur.empty() && m_lastCaretPos > 0)
+                        cp = m_lastCaretPos;
+                    if (cp != m_lastCaretPos) {
+                        m_lastCaretPos = cp;
+                        m_cursorBlink = 0;
+                    }
                 }
             }
             // Reposition EDIT at cursor (once per frame, no text overwrite).
@@ -1491,6 +1563,22 @@ void App::tick(float dt) {
                 }
                 break;
             }
+        }
+    }
+    if (m_hidingToTray) {
+        if (m_hideAnim == 0.0f) {
+            LONG_PTR ex = GetWindowLongPtrW(m_hwnd, GWL_EXSTYLE);
+            if (!(ex & WS_EX_LAYERED)) SetWindowLongPtrW(m_hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
+        }
+        float fadeT = m_hideAnim < 0.15f ? 0.0f : (m_hideAnim - 0.15f) / 0.85f;
+        BYTE alpha = (BYTE)(255.0f * (1.0f - fadeT * fadeT * fadeT * fadeT));
+        SetLayeredWindowAttributes(m_hwnd, 0, alpha, LWA_ALPHA);
+        m_hideAnim += dt / 0.45f;
+        if (m_hideAnim >= 1.0f) {
+            m_hidingToTray = false;
+            m_hideAnim = 0;
+            SetLayeredWindowAttributes(m_hwnd, 0, 255, LWA_ALPHA);
+            ShowWindow(m_hwnd, SW_HIDE);
         }
     }
     if (m_closing) {
@@ -1796,7 +1884,7 @@ void App::onLButtonDown(float x, float y) {
     float btnY1 = (AppC::TITLE_H - btnH) / 2, btnY2 = btnY1 + btnH;
     float closeX = W - rightPad - closeW, snapX = closeX - gap - snapW;
     if (y < AppC::TITLE_H) {
-        if (inRect(x, y, D2D1::RectF(closeX, btnY1, closeX + closeW, btnY2))) { requestClose(); return; }
+        if (inRect(x, y, D2D1::RectF(closeX, btnY1, closeX + closeW, btnY2))) { hideToTray(); return; }
         if (inRect(x, y, D2D1::RectF(snapX, btnY1, snapX + snapW, btnY2))) {
             RECT wa; SystemParametersInfoW(SPI_GETWORKAREA, 0, &wa, 0);
             int pw = toPx(W), ph = toPx(H);

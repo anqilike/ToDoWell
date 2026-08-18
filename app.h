@@ -60,12 +60,14 @@ public:
     void onEditReturn();
     void onEditEscape();
     void onEditKillFocus();
+    void onEditChanged(bool userKey);
     void onCompositionUpdate(const std::wstring& s);
     void onCompositionResult(const std::wstring& s);
     void onCompositionEnd();
     void hideImeWindows();
     void refreshImeMode();
     void showFromTray(bool openSettings);
+    void hideToTray();
     void exitFromTray();
     void bringToFront();
     HWND hwnd() const { return m_hwnd; }
@@ -119,6 +121,9 @@ private:
     std::wstring m_compositionText; // in-progress IME composition
     std::wstring m_lastEditLayout;  // text used for the last hit layout rebuild
     float m_cursorBlink = 0; // cursor blink timer
+    int m_lastCaretPos = -1; // last known EDIT caret position
+    bool m_hidingToTray = false; // fading out to the tray
+    float m_hideAnim = 0;        // tray-hide fade progress (0..1)
     float m_closeAnim = 0; // 0..1 close animation progress
     int m_closeFrames = 0;
     float m_startupT = 0;      // seconds since startup, for one-time z-order fix
