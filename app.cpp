@@ -91,6 +91,8 @@ void App::exitFromTray() {
 bool App::animating() const {
     if (m_closing) return true;
     if (m_hidingToTray) return true;
+    if (m_draggingCard) return true;
+    if (m_cardDropAnimating) return true;
     if (m_snapping) return true;
     // Keep repainting while the overlay shade fades in OR out, so the main
     // page never gets stuck dimmed after closing settings/about.
@@ -814,6 +816,7 @@ void App::rebuildHits() {
     m_w = g_gfx.clientW();
     m_h = g_gfx.clientH();
     m_hits.clear();
+    m_cardRects.clear();
     m_contentH = 0;
     m_editRectDip = {};
 
@@ -871,6 +874,9 @@ void App::rebuildHits() {
         }
         y = ntTop + ntH + 4.0f;
         float cardBottom = y + 6.0f;
+        D2D1_RECT_F cardRect = D2D1::RectF(contentLeft, cardTop, contentLeft + contentW, cardBottom);
+        m_cardRects.push_back(cardRect);
+        m_hits.push_back({cardRect, H_PROJ_CARD, (int)pi, -1});
         m_contentH = std::max(m_contentH, cardBottom + AppC::CARD_GAP);
         (void)screenY;
         y = cardBottom;
@@ -891,6 +897,92 @@ void App::rebuildHits() {
     }
     (void)screenY;
     clampScroll();
+}
+void App::beginCardDrag(int pi, float contentY) {
+    if (m_cardDropAnimating || !m_fades.empty() ||
+        pi < 0 || pi >= (int)m_projects.size()) return;
+    if (m_editMode == ED_PREF_PREFIX) {
+        endEdit(false);
+        closeSettings();
+    } else if (m_editMode != ED_NONE) {
+        onEditKillFocus();
+        if (m_editMode != ED_NONE) endEdit(false);
+    }
+    rebuildHits();
+    const D2D1_RECT_F cr = m_cardRects[pi];
+    m_draggingCard = true;
+    m_dragPi = pi;
+    m_dragTarget = pi;
+    m_dragGrabOffset = contentY - cr.top;
+    m_dragCardTop = cr.top;
+    m_dragCurrentContentY = cr.top;
+    m_dragMouseContentY = contentY;
+    m_hoverProjDel = -1;
+    m_hovCircPi = -1;
+    m_hovCircTi = -2;
+    SetCapture(m_hwnd);
+    requestRedraw();
+}
+float App::drawProjectCard(Gfx& g, int pi, float yContent, bool floating) {
+    auto& proj = m_projects[pi];
+    float cTop = AppC::TITLE_H;
+    float contentLeft = AppC::CONTENT_PAD;
+    float contentW = m_w - 2 * AppC::CONTENT_PAD;
+    float scrollOff = m_scroll;
+    float cxRow = contentLeft + AppC::CARD_INNER + AppC::CIRCLE_R + 2.0f;
+    float textXRow = cxRow + AppC::CIRCLE_R + 8.0f;
+    float textRightRow = contentLeft + contentW - AppC::CARD_INNER;
+    float rowsH = 0;
+    for (size_t ti = 0; ti < proj.todos.size(); ++ti)
+        rowsH += rowHForTodo(pi, (int)ti, textRightRow - textXRow);
+    float ntH = AppC::ROW_H;
+    float cardContentBot = yContent + AppC::CARD_TOP + AppC::BADGE_H + 6.0f
+                          + rowsH + ntH + 4.0f + 6.0f;
+    float scrTop = cTop + yContent - scrollOff;
+    float scrBot = cTop + cardContentBot - scrollOff;
+    D2D1_RECT_F cardRc = D2D1::RectF(contentLeft, scrTop, contentLeft + contentW, scrBot);
+    if (floating) {
+        g.fillRoundedRect(D2D1::RectF(contentLeft + 3.0f, scrTop + 5.0f,
+                                      contentLeft + contentW + 3.0f, scrBot + 5.0f),
+                          8.0f, D2D1::ColorF(0, 0, 0, 0.12f));
+    }
+    g.fillRoundedRect(cardRc, 8.0f, C::WHITE);
+    if (floating) g.strokeRoundedRect(cardRc, 8.0f, C::ACCENT, 2.0f);
+    float hy = yContent + AppC::CARD_TOP;
+    float screenHy = cTop + hy - scrollOff;
+    float badgeX = contentLeft + AppC::CARD_INNER;
+    std::wstring num = std::to_wstring(pi + 1);
+    float tw = g.measureTextW(num, F_PROJ_NUM);
+    float badgeW = std::max(AppC::BADGE_MIN_W, tw + 12.0f);
+    DWORD col = C::PROJ_COLORS[pi % 8];
+    g.fillRoundedRect(D2D1::RectF(badgeX, screenHy, badgeX + badgeW, screenHy + AppC::BADGE_H), 4.0f, Hex(col));
+    g.drawText(num, D2D1::RectF(badgeX, screenHy, badgeX + badgeW, screenHy + AppC::BADGE_H), F_PROJ_NUM, C::WHITE,
+               DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    float nameX = badgeX + badgeW + 6.0f;
+    float delW = 22.0f;
+    float nameRight = contentLeft + contentW - AppC::CARD_INNER - delW;
+    g.drawText(proj.name, D2D1::RectF(nameX, screenHy, nameRight, screenHy + AppC::BADGE_H), F_PROJ_NAME, C::TEXT);
+    float delX = contentLeft + contentW - AppC::CARD_INNER - delW;
+    D2D1_COLOR_F delCol = lerpColor(C::DEL_BTN, C::DEL_HOVER, m_projDelT);
+    D2D1_RECT_F delRc = D2D1::RectF(delX, screenHy, delX + delW, screenHy + AppC::BADGE_H);
+    g.drawText(L"\u2715", delRc, F_SYM_TITLE, delCol,
+               DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+    float y = hy + AppC::BADGE_H + 6.0f;
+    for (size_t ti = 0; ti < proj.todos.size(); ++ti) {
+        float rh = rowHForTodo(pi, (int)ti, textRightRow - textXRow);
+        float cy = todoCircleY(proj.todos[ti].text, y, textRightRow - textXRow);
+        float sy = cTop + y - scrollOff;
+        g.drawEllipse(cxRow, cy + (cTop - scrollOff), AppC::CIRCLE_R, AppC::CIRCLE_R, C::CIRCLE, 1.8f);
+        g.drawText(proj.todos[ti].text, D2D1::RectF(textXRow, sy, textRightRow, sy + rh), F_TODO, C::TEXT,
+                   DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        y += rh;
+    }
+    float ntTop = y;
+    float cy = ntTop + AppC::ROW_H / 2.0f;
+    float sy = cTop + ntTop - scrollOff;
+    g.drawEllipse(cxRow, cy + (cTop - scrollOff), AppC::CIRCLE_R, AppC::CIRCLE_R, C::CIRCLE, 1.5f);
+    y += ntH + 4.0f + 6.0f + AppC::CARD_GAP;
+    return y;
 }
 D2D1_COLOR_F App::lerpColor(D2D1_COLOR_F a, D2D1_COLOR_F b, float t) const {
     return D2D1::ColorF(a.r + (b.r - a.r) * t, a.g + (b.g - a.g) * t, a.b + (b.b - a.b) * t, a.a + (b.a - a.a) * t);
@@ -1033,9 +1125,21 @@ void App::render() {
         // Card white background
         float cardContentBot = y + AppC::CARD_TOP + AppC::BADGE_H + 6.0f
                               + rowsH + ntH + 4.0f + 6.0f;
+        if ((m_draggingCard || m_cardDropAnimating) && (int)pi == m_dragPi) {
+            y = cardContentBot + AppC::CARD_GAP;
+            continue;
+        }
         float scrTop = cTop + y - scrollOff;
         float scrBot = cTop + cardContentBot - scrollOff;
-        g.fillRoundedRect(D2D1::RectF(contentLeft, scrTop, contentLeft + contentW, scrBot), 8.0f, C::WHITE);
+        D2D1_RECT_F cardRc = D2D1::RectF(contentLeft, scrTop, contentLeft + contentW, scrBot);
+        if (m_draggingCard || m_cardDropAnimating) {
+            g.fillRoundedRect(D2D1::RectF(contentLeft + 3.0f, scrTop + 5.0f,
+                                          contentLeft + contentW + 3.0f, scrBot + 5.0f),
+                              8.0f, D2D1::ColorF(0, 0, 0, 0.10f));
+        }
+        g.fillRoundedRect(cardRc, 8.0f, C::WHITE);
+        if (m_draggingCard && (int)pi == m_dragPi)
+            g.strokeRoundedRect(cardRc, 8.0f, C::ACCENT, 2.0f);
         float hy = y + AppC::CARD_TOP;
         float screenHy = cTop + hy - scrollOff;
         float badgeX = contentLeft + AppC::CARD_INNER;
@@ -1128,6 +1232,16 @@ void App::render() {
         }
         y += ntH + 4.0f + 6.0f + AppC::CARD_GAP;
 
+    }
+    if ((m_draggingCard || m_cardDropAnimating) && m_dragPi >= 0 && m_dragPi < (int)m_cardRects.size()) {
+        D2D1_RECT_F slot = m_cardRects[m_dragPi];
+        float slotTopContent = m_cardDropAnimating ? m_dropEndY : slot.top;
+        float slotBotContent = slotTopContent + (slot.bottom - slot.top);
+        float slotTop = cTop + slotTopContent - scrollOff;
+        float slotBot = cTop + slotBotContent - scrollOff;
+        g.strokeRoundedRect(D2D1::RectF(contentLeft, slotTop, contentLeft + contentW, slotBot),
+                            8.0f, D2D1::ColorF(C::ACCENT.r, C::ACCENT.g, C::ACCENT.b, 0.35f), 1.5f);
+        drawProjectCard(g, m_dragPi, m_dragCurrentContentY, true);
     }
     m_contentH = std::max(m_contentH, y + AppC::CARD_GAP);
     if (m_addingProject) {
@@ -1276,7 +1390,7 @@ void App::render() {
                    D2D1::ColorF(C::TITLE_FG.r, C::TITLE_FG.g, C::TITLE_FG.b, oa),
                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         g.rt->PopAxisAlignedClip();
-        g.drawText(L"\u7248\u672c 2.5.11", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.12", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
         float posBottom = noteY + noteH;
@@ -1318,7 +1432,7 @@ void App::render() {
         }
         g.rt->PopAxisAlignedClip();
         m_aboutContentH = (ty - sy) - dlgY + 10.0f;
-        g.drawText(L"\u7248\u672c 2.5.11", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.12", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
     }
 
@@ -1373,6 +1487,39 @@ void App::tick(float dt) {
             m_startupRaised = true;
             if (!m_closing) bringToFront();
         }
+    }
+    if (m_cardDropAnimating) {
+        m_dropAnim += dt / 0.25f;
+        float t = std::min(1.0f, m_dropAnim);
+        float ease = 1.0f - (1.0f - t) * (1.0f - t) * (1.0f - t);
+        m_dragCurrentContentY = m_dropStartY + (m_dropEndY - m_dropStartY) * ease;
+        if (t >= 1.0f) {
+            if (m_dragPi >= 0 && m_dragPi < (int)m_projects.size() &&
+                m_dropTarget >= 0 && m_dropTarget <= (int)m_projects.size()) {
+                Project moved = m_projects[m_dragPi];
+                m_projects.erase(m_projects.begin() + m_dragPi);
+                m_projects.insert(m_projects.begin() + m_dropTarget, moved);
+                saveAll();
+                rebuildHits();
+            }
+            m_cardDropAnimating = false;
+            m_dropAnim = 0;
+            m_dragPi = -1;
+            m_dragTarget = -1;
+            m_dropTarget = -1;
+            m_dragGrabOffset = 0;
+            m_dragCardTop = 0;
+            m_dragCurrentContentY = 0;
+            m_dragMouseContentY = 0;
+        }
+    }
+    if (m_draggingCard && m_dragPi >= 0 && m_dragPi < (int)m_cardRects.size()) {
+        float cardH = m_cardRects[m_dragPi].bottom - m_cardRects[m_dragPi].top;
+        float target = m_dragMouseContentY - m_dragGrabOffset;
+        float maxY = std::max(0.0f, m_contentH - cardH);
+        if (target < 0) target = 0;
+        if (target > maxY) target = maxY;
+        approach(m_dragCurrentContentY, target, dt, 18.0f);
     }
     if (m_editMode != ED_NONE) {
         m_imeHideTimer += dt;
@@ -1719,6 +1866,19 @@ static bool inRect(float x, float y, const D2D1_RECT_F& r) {
 void App::onMouseMove(float x, float y) {
     bool moved = (std::abs(x - m_lastMouseX) > 0.5f || std::abs(y - m_lastMouseY) > 0.5f);
     m_lastMouseX = x; m_lastMouseY = y;
+    if (m_draggingCard) {
+        if (moved) {
+            m_dragMouseContentY = y - AppC::TITLE_H + m_scroll;
+            int to = (int)m_projects.size();
+            for (size_t i = 0; i < m_cardRects.size(); ++i) {
+                float centerY = (m_cardRects[i].top + m_cardRects[i].bottom) * 0.5f;
+                if (m_dragMouseContentY < centerY) { to = (int)i; break; }
+            }
+            m_dragTarget = to;
+        }
+        requestRedraw();
+        return;
+    }
     if (moved) m_suppressCircleHover = false;
     float W = m_w, H = m_h;
     float closeW = 32, snapW = 32, gap = 8, rightPad = 12, btnH = 24;
@@ -1768,7 +1928,40 @@ void App::onMouseMove(float x, float y) {
     if (m_suppressCircleHover) { if (m_hovCircPi >= 0) m_circT = 0; m_hovCircPi = -1; m_hovCircTi = -2; }
     requestRedraw(); // hover states change -> repaint so highlights appear
 }
-void App::onLButtonUp(float, float) {}
+void App::onLButtonUp(float, float) {
+    if (!m_draggingCard) return;
+    ReleaseCapture();
+    if (m_dragPi >= 0 && m_dragPi < (int)m_projects.size() &&
+        m_dragPi < (int)m_cardRects.size()) {
+        int from = m_dragPi;
+        int to = m_dragTarget;
+        if (to < 0) to = 0;
+        if (to > (int)m_projects.size()) to = (int)m_projects.size();
+        std::vector<D2D1_RECT_F> rects = m_cardRects;
+        D2D1_RECT_F movedRect = rects[from];
+        rects.erase(rects.begin() + from);
+        if (to > from) --to;
+        rects.insert(rects.begin() + to, movedRect);
+        m_dropTarget = to;
+        m_dropStartY = m_dragCurrentContentY;
+        m_dropEndY = rects[to].top;
+        m_dropAnim = 0;
+        m_cardDropAnimating = true;
+        m_draggingCard = false;
+        requestRedraw();
+        return;
+    }
+    // Invalid state: clear everything.
+    m_draggingCard = false;
+    m_dragPi = -1;
+    m_dragTarget = -1;
+    m_dragGrabOffset = 0;
+    m_dragCardTop = 0;
+    m_dragCurrentContentY = 0;
+    m_dragMouseContentY = 0;
+    rebuildHits();
+    requestRedraw();
+}
 void App::onLButtonDblClk(float x, float y) {
     if (m_closing) return;
     float W = m_w, H = m_h;
@@ -1937,8 +2130,14 @@ void App::onLButtonDown(float x, float y) {
                         return;
                     case H_PROJ_DEL: delProject(h.pi); return;
                     case H_PROJ_NAME:
-                        if (m_editMode == ED_EDIT_PROJECT && m_editPi == h.pi)
+                        if (m_editMode == ED_EDIT_PROJECT && m_editPi == h.pi) {
                             setEditCaretFromPoint(x, contentY);
+                        } else {
+                            beginCardDrag(h.pi, contentY);
+                        }
+                        return;
+                    case H_PROJ_CARD:
+                        beginCardDrag(h.pi, contentY);
                         return;
                     default: return;
                 }

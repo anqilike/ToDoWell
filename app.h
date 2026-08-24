@@ -30,7 +30,7 @@ enum EditMode { ED_NONE, ED_ADD_PROJECT, ED_EDIT_PROJECT, ED_NEW_TODO, ED_EDIT_T
 
 enum HitType {
     H_NONE, H_TITLEBAR, H_SNAP, H_CLOSE, H_ADD, H_GEAR,
-    H_PROJ_NAME, H_PROJ_DEL, H_TODO_CIRCLE, H_TODO_TEXT, H_NEWTODO,
+    H_PROJ_NAME, H_PROJ_DEL, H_PROJ_CARD, H_TODO_CIRCLE, H_TODO_TEXT, H_NEWTODO,
     H_OVERLAY_SHADE, H_SETTINGS_PANEL, H_CHECKBOX, H_PREF_FIELD, H_ABOUT_BTN,
     H_ABOUT_PANEL, H_ABOUT_CLOSE
 };
@@ -156,9 +156,24 @@ int m_hoverAdd = 0; float m_addT = 0;
 
     std::vector<FadeTodo> m_fades;
     std::vector<Hit> m_hits; // content-space rects (y relative to content top, pre-scroll)
+    std::vector<D2D1_RECT_F> m_cardRects; // project card content-space rects
     D2D1_RECT_F m_editRectDip = {};
+    bool m_draggingCard = false;
+    int m_dragPi = -1;
+    int m_dragTarget = -1;
+    float m_dragGrabOffset = 0;    // click y relative to card top
+    float m_dragCardTop = 0;       // original card top in content space
+    float m_dragCurrentContentY = 0; // animated floating-card top in content space
+    float m_dragMouseContentY = 0; // current mouse y in content space
+    bool m_cardDropAnimating = false;
+    float m_dropAnim = 0;          // release drop animation 0..1
+    float m_dropStartY = 0;
+    float m_dropEndY = 0;
+    int m_dropTarget = -1;         // final insertion index after adjust
 
     void rebuildHits();
+    void beginCardDrag(int pi, float contentY);
+    float drawProjectCard(Gfx& g, int pi, float yContent, bool floating);
     void pollIme();
     bool detectLegacyIme();
     float todoRowH(const std::wstring& text, float maxW); // wrapped row height
