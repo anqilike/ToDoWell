@@ -14,6 +14,7 @@ struct Config {
     bool auto_start = false;
     int snap_anim = 1;
     int default_pos = 0; // 0=右下角 1=左上角 2=左下角 3=右上角
+    int card_text_size = 1; // 0=小 1=标准 2=大 3=特大（仅项目卡片）
 };
 // Snap animation modes: 0=instant, 1=fly-out/slide-in, 2=portal fade, 3=elastic, 4=arc glide.
 // Snap animation modes: 0=instant, 1=portal fade, 2=elastic spring, 3=arc glide.

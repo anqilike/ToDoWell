@@ -21,6 +21,7 @@ static WNDPROC g_editOldProc = nullptr;
 static HFONT g_fontTodo = nullptr;
 static HFONT g_fontProj = nullptr;
 static HBRUSH g_whiteBrush = nullptr;
+static const float kCardTextScales[] = {0.90f, 1.00f, 1.15f, 1.30f};
 // 版权署名：公开版为 anqilike；编译内部版时把这里改为 5014 即可全局生效。
 static const wchar_t* kCopyright = L"\u7248\u6743\u6240\u6709@\u5929\u624d\u7684anqilike";
 
@@ -113,6 +114,42 @@ static HFONT makeHFont(int pt, bool bold) {
                        DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS,
                        CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Microsoft YaHei");
 }
+float App::cardHeaderH() const {
+    // Keep the original 18-DIP header at the default size; only grow it when
+    // the project title itself needs more vertical room.
+    static const float headerH[] = {18.0f, 18.0f, 21.0f, 25.0f};
+    int i = m_cfg.card_text_size;
+    if (i < 0) i = 0;
+    if (i > 3) i = 3;
+    return headerH[i];
+}
+void App::applyCardTextSize() {
+    int i = m_cfg.card_text_size;
+    if (i < 0) i = 0;
+    if (i > 3) i = 3;
+    m_cfg.card_text_size = i;
+    float scale = kCardTextScales[i];
+    g_gfx.setCardTextScale(scale);
+
+    if (g_fontTodo) DeleteObject(g_fontTodo);
+    if (g_fontProj) DeleteObject(g_fontProj);
+    int todoPt = (int)std::lround(10.0f * scale);
+    int projPt = (int)std::lround(12.0f * scale);
+    if (todoPt < 1) todoPt = 1;
+    if (projPt < 1) projPt = 1;
+    g_fontTodo = makeHFont(todoPt, false);
+    g_fontProj = makeHFont(projPt, true);
+
+    if (m_edit) {
+        HFONT f = (m_editMode == ED_EDIT_PROJECT || m_editMode == ED_ADD_PROJECT)
+                  ? g_fontProj : g_fontTodo;
+        SendMessageW(m_edit, WM_SETFONT, (WPARAM)f, TRUE);
+    }
+    rebuildHits();
+    clampScroll();
+    if (m_editMode != ED_NONE) positionEdit();
+    requestRedraw();
+}
 void App::create(HWND hwnd) {
     g_app = this;
     m_hwnd = hwnd;
@@ -128,10 +165,7 @@ void App::create(HWND hwnd) {
     m_w = g_gfx.clientW();
     m_h = g_gfx.clientH();
     refreshImeMode(); // 打开时立即识别当前输入法（搜狗走传统路径，微软拼音走自绘路径）
-    if (!g_fontTodo) g_fontTodo = makeHFont(10, false);
-    if (!g_fontProj) g_fontProj = makeHFont(12, true);
-    rebuildHits();
-    clampScroll();
+    applyCardTextSize();
 }
 void App::destroy() {
     saveAll();
@@ -838,13 +872,13 @@ void App::rebuildHits() {
         float nameX = badgeX + badgeW + 6.0f;
         float delW = 22.0f;
         float nameRight = contentLeft + contentW - AppC::CARD_INNER - delW;
-        m_hits.push_back({D2D1::RectF(nameX, hy, nameRight, hy + AppC::BADGE_H), H_PROJ_NAME, (int)pi, -1});
+        float headerH = cardHeaderH();
+        m_hits.push_back({D2D1::RectF(nameX, hy, nameRight, hy + headerH), H_PROJ_NAME, (int)pi, -1});
         float delX = contentLeft + contentW - AppC::CARD_INNER - delW;
-        m_hits.push_back({D2D1::RectF(delX, hy, delX + delW, hy + AppC::BADGE_H), H_PROJ_DEL, (int)pi, -1});
+        m_hits.push_back({D2D1::RectF(delX, hy, delX + delW, hy + headerH), H_PROJ_DEL, (int)pi, -1});
         if (m_editMode == ED_EDIT_PROJECT && m_editPi == (int)pi) {
-            m_editRectDip = D2D1::RectF(nameX, hy - 2, nameRight, hy + AppC::BADGE_H + 2);
+            m_editRectDip = D2D1::RectF(nameX, hy - 2, nameRight, hy + headerH + 2);
         }
-        float headerH = AppC::BADGE_H;
         y = hy + headerH + 6.0f;
         float cxRow = contentLeft + AppC::CARD_INNER + AppC::CIRCLE_R + 2.0f;
         float textXRow = cxRow + AppC::CIRCLE_R + 8.0f;
@@ -936,7 +970,8 @@ float App::drawProjectCard(Gfx& g, int pi, float yContent, bool floating) {
     for (size_t ti = 0; ti < proj.todos.size(); ++ti)
         rowsH += rowHForTodo(pi, (int)ti, textRightRow - textXRow);
     float ntH = AppC::ROW_H;
-    float cardContentBot = yContent + AppC::CARD_TOP + AppC::BADGE_H + 6.0f
+    float headerH = cardHeaderH();
+    float cardContentBot = yContent + AppC::CARD_TOP + headerH + 6.0f
                           + rowsH + ntH + 4.0f + 6.0f;
     float scrTop = cTop + yContent - scrollOff;
     float scrBot = cTop + cardContentBot - scrollOff;
@@ -955,19 +990,20 @@ float App::drawProjectCard(Gfx& g, int pi, float yContent, bool floating) {
     float tw = g.measureTextW(num, F_PROJ_NUM);
     float badgeW = std::max(AppC::BADGE_MIN_W, tw + 12.0f);
     DWORD col = C::PROJ_COLORS[pi % 8];
-    g.fillRoundedRect(D2D1::RectF(badgeX, screenHy, badgeX + badgeW, screenHy + AppC::BADGE_H), 4.0f, Hex(col));
-    g.drawText(num, D2D1::RectF(badgeX, screenHy, badgeX + badgeW, screenHy + AppC::BADGE_H), F_PROJ_NUM, C::WHITE,
+    float badgeY = screenHy + (headerH - AppC::BADGE_H) * 0.5f;
+    g.fillRoundedRect(D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + AppC::BADGE_H), 4.0f, Hex(col));
+    g.drawText(num, D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + AppC::BADGE_H), F_PROJ_NUM, C::WHITE,
                DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     float nameX = badgeX + badgeW + 6.0f;
     float delW = 22.0f;
     float nameRight = contentLeft + contentW - AppC::CARD_INNER - delW;
-    g.drawText(proj.name, D2D1::RectF(nameX, screenHy, nameRight, screenHy + AppC::BADGE_H), F_PROJ_NAME, C::TEXT);
+    g.drawText(proj.name, D2D1::RectF(nameX, screenHy, nameRight, screenHy + headerH), F_PROJ_NAME, C::TEXT);
     float delX = contentLeft + contentW - AppC::CARD_INNER - delW;
     D2D1_COLOR_F delCol = lerpColor(C::DEL_BTN, C::DEL_HOVER, m_projDelT);
-    D2D1_RECT_F delRc = D2D1::RectF(delX, screenHy, delX + delW, screenHy + AppC::BADGE_H);
+    D2D1_RECT_F delRc = D2D1::RectF(delX, screenHy, delX + delW, screenHy + headerH);
     g.drawText(L"\u2715", delRc, F_SYM_TITLE, delCol,
                DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-    float y = hy + AppC::BADGE_H + 6.0f;
+    float y = hy + headerH + 6.0f;
     for (size_t ti = 0; ti < proj.todos.size(); ++ti) {
         float rh = rowHForTodo(pi, (int)ti, textRightRow - textXRow);
         float cy = todoCircleY(proj.todos[ti].text, y, textRightRow - textXRow);
@@ -1122,8 +1158,9 @@ void App::render() {
         float ntH = AppC::ROW_H;
         if (m_editMode == ED_NEW_TODO && m_editPi == (int)pi)
             ntH = todoRowH(m_editText + m_compositionText, textRightRow - textXRow);
+        float headerH = cardHeaderH();
         // Card white background
-        float cardContentBot = y + AppC::CARD_TOP + AppC::BADGE_H + 6.0f
+        float cardContentBot = y + AppC::CARD_TOP + headerH + 6.0f
                               + rowsH + ntH + 4.0f + 6.0f;
         if ((m_draggingCard || m_cardDropAnimating) && (int)pi == m_dragPi) {
             y = cardContentBot + AppC::CARD_GAP;
@@ -1147,8 +1184,9 @@ void App::render() {
         float tw = g.measureTextW(num, F_PROJ_NUM);
         float badgeW = std::max(AppC::BADGE_MIN_W, tw + 12.0f);
         DWORD col = C::PROJ_COLORS[pi % 8];
-        g.fillRoundedRect(D2D1::RectF(badgeX, screenHy, badgeX + badgeW, screenHy + AppC::BADGE_H), 4.0f, Hex(col));
-        g.drawText(num, D2D1::RectF(badgeX, screenHy, badgeX + badgeW, screenHy + AppC::BADGE_H), F_PROJ_NUM, C::WHITE,
+        float badgeY = screenHy + (headerH - AppC::BADGE_H) * 0.5f;
+        g.fillRoundedRect(D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + AppC::BADGE_H), 4.0f, Hex(col));
+        g.drawText(num, D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + AppC::BADGE_H), F_PROJ_NUM, C::WHITE,
                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         float nameX = badgeX + badgeW + 6.0f;
         float delW = 22.0f;
@@ -1156,15 +1194,15 @@ void App::render() {
         if (m_editMode == ED_EDIT_PROJECT && m_editPi == (int)pi) {
             std::wstring dtext = m_editText + m_compositionText;
             // Full-width underline, matching the todo row editing style.
-            g.drawLine(nameX, screenHy + AppC::BADGE_H - 1, nameRight, screenHy + AppC::BADGE_H - 1, C::ACCENT, 1.5f);
-            g.drawText(dtext, D2D1::RectF(nameX, screenHy, nameRight, screenHy + AppC::BADGE_H), F_PROJ_NAME, C::TEXT);
-            drawEditCaret(g, F_PROJ_NAME, dtext, nameX, screenHy, nameRight - nameX, AppC::BADGE_H);
+            g.drawLine(nameX, screenHy + headerH - 1, nameRight, screenHy + headerH - 1, C::ACCENT, 1.5f);
+            g.drawText(dtext, D2D1::RectF(nameX, screenHy, nameRight, screenHy + headerH), F_PROJ_NAME, C::TEXT);
+            drawEditCaret(g, F_PROJ_NAME, dtext, nameX, screenHy, nameRight - nameX, headerH);
         } else {
-            g.drawText(proj.name, D2D1::RectF(nameX, screenHy, nameRight, screenHy + AppC::BADGE_H), F_PROJ_NAME, C::TEXT);
+            g.drawText(proj.name, D2D1::RectF(nameX, screenHy, nameRight, screenHy + headerH), F_PROJ_NAME, C::TEXT);
         }
         float delX = contentLeft + contentW - AppC::CARD_INNER - delW;
         D2D1_COLOR_F delCol = lerpColor(C::DEL_BTN, C::DEL_HOVER, m_projDelT);
-        D2D1_RECT_F delRc = D2D1::RectF(delX, screenHy, delX + delW, screenHy + AppC::BADGE_H);
+        D2D1_RECT_F delRc = D2D1::RectF(delX, screenHy, delX + delW, screenHy + headerH);
         D2D1_POINT_2F delOff = IconInkCenterOffset(g, F_SYM_TITLE, L"\u2715");
         D2D1_POINT_2F delC = { delRc.left + (delRc.right - delRc.left) * 0.5f + delOff.x,
                                delRc.top + (delRc.bottom - delRc.top) * 0.5f + delOff.y };
@@ -1174,7 +1212,7 @@ void App::render() {
         g.drawText(L"\u2715", delRc, F_SYM_TITLE, delCol,
                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         g.rt->SetTransform(D2D1::Matrix3x2F::Identity());
-        y = hy + AppC::BADGE_H + 6.0f;
+        y = hy + headerH + 6.0f;
 
         for (size_t ti = 0; ti < proj.todos.size(); ++ti) {
             bool fading = false;
@@ -1330,7 +1368,30 @@ void App::render() {
             if (((int)(m_cursorBlink * 2) % 2) == 0)
                 g.drawLine(dlgX + 22 + tw + cw + 1, fy + 3, dlgX + 22 + tw + cw + 1, fy + 23, D2D1::ColorF(C::ACCENT.r, C::ACCENT.g, C::ACCENT.b, oa), 1.5f);
         }
-        float ay = fy + 26 + 10.0f;
+        float tsTitleY = fy + 26 + 10.0f;
+        g.drawText(L"\u5361\u7247\u6587\u5b57\u5927\u5c0f\uff1a",
+                   D2D1::RectF(dlgX + 16, tsTitleY, dlgX + dlgW - 16, tsTitleY + 16),
+                   F_HINT, D2D1::ColorF(C::DIALOG_MM.r, C::DIALOG_MM.g, C::DIALOG_MM.b, oa));
+        const wchar_t* sizeNames[] = { L"\u5c0f", L"\u6807\u51c6", L"\u5927", L"\u7279\u5927" };
+        float tsW = 42.0f, tsH = 22.0f, tsGap = 6.0f;
+        float tsY = tsTitleY + 18.0f;
+        for (int i = 0; i < 4; ++i) {
+            float ox = dlgX + 16 + i * (tsW + tsGap);
+            bool sel = (m_cfg.card_text_size == i);
+            if (sel) g.fillRoundedRect(D2D1::RectF(ox, tsY, ox + tsW, tsY + tsH), 4.0f,
+                                       D2D1::ColorF(C::ACCENT.r, C::ACCENT.g, C::ACCENT.b, oa));
+            else g.strokeRoundedRect(D2D1::RectF(ox, tsY, ox + tsW, tsY + tsH), 4.0f,
+                                     D2D1::ColorF(C::INPUT_BD.r, C::INPUT_BD.g, C::INPUT_BD.b, oa), 1.0f);
+            D2D1_COLOR_F tx = sel ? D2D1::ColorF(1, 1, 1, oa)
+                                  : D2D1::ColorF(C::DIALOG_TX.r, C::DIALOG_TX.g, C::DIALOG_TX.b, oa);
+            g.drawText(sizeNames[i], D2D1::RectF(ox, tsY, ox + tsW, tsY + tsH), F_HINT, tx,
+                       DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        }
+        float tsHintY = tsY + tsH + 4.0f;
+        g.drawText(L"\u4ec5\u5f71\u54cd\u9879\u76ee\u5361\u7247\u5185\u6587\u5b57",
+                   D2D1::RectF(dlgX + 16, tsHintY, dlgX + dlgW - 16, tsHintY + 14),
+                   F_HINT, D2D1::ColorF(C::DIALOG_MM.r, C::DIALOG_MM.g, C::DIALOG_MM.b, oa));
+        float ay = tsHintY + 20.0f;
         float say = ay;
         g.drawText(L"\u5f52\u4f4d\u52a8\u753b\uff1a", D2D1::RectF(dlgX + 16, say, dlgX + dlgW - 16, say + 16), F_HINT, D2D1::ColorF(C::DIALOG_MM.r, C::DIALOG_MM.g, C::DIALOG_MM.b, oa));
         say += 18.0f;
@@ -1390,7 +1451,7 @@ void App::render() {
                    D2D1::ColorF(C::TITLE_FG.r, C::TITLE_FG.g, C::TITLE_FG.b, oa),
                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         g.rt->PopAxisAlignedClip();
-        g.drawText(L"\u7248\u672c 2.5.12", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.13", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
         float posBottom = noteY + noteH;
@@ -1415,7 +1476,7 @@ void App::render() {
             L"\u2022 待办任务：点击圆圈完成（淡出动画）、单击编辑、回车连续新增",
             L"\u2022 中文输入法：拼音组合与候选框跟随光标，Win7 / Win11 均正常",
             L"\u2022 自绘 UI 与动画：Direct2D 硬件加速，归位动画、关闭淡出、悬停旋转",
-            L"\u2022 设置面板：开机自启、标题前缀（最多 5 个汉字）、动画一键切换",
+            L"\u2022 设置面板：开机自启、标题前缀、卡片文字大小、动画一键切换",
             L"\u2022 数据持久化：todos.json / config.json 即时写入，删除即可重置",
             L"\u2022 轻量单文件：约 400 KB 单 exe，免安装、免联网、无第三方依赖",
             L"\u2022 平台兼容：Windows 7 SP1+ / Windows 11，支持高 DPI",
@@ -1432,7 +1493,7 @@ void App::render() {
         }
         g.rt->PopAxisAlignedClip();
         m_aboutContentH = (ty - sy) - dlgY + 10.0f;
-        g.drawText(L"\u7248\u672c 2.5.12", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.13", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
     }
 
@@ -2035,7 +2096,21 @@ void App::onLButtonDown(float x, float y) {
             beginEdit(ED_PREF_PREFIX, -1, -1, m_cfg.title_prefix);
             return;
         }
-        float ay = fy + 26 + 10;
+        float tsTitleY = fy + 26 + 10;
+        float tsY = tsTitleY + 18;
+        float tsW = 42, tsH = 22, tsGap = 6;
+        for (int i = 0; i < 4; ++i) {
+            float ox = dlgX + 16 + i * (tsW + tsGap);
+            if (inRect(x, y, D2D1::RectF(ox, tsY, ox + tsW, tsY + tsH))) {
+                if (m_cfg.card_text_size != i) {
+                    m_cfg.card_text_size = i;
+                    applyCardTextSize();
+                    saveAll();
+                }
+                return;
+            }
+        }
+        float ay = tsY + tsH + 4 + 20;
         float say = ay + 18.0f;
         float optW = 52, optH = 22, optGap = 8;
         int perRow = 3;

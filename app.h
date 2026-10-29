@@ -179,6 +179,8 @@ int m_hoverAdd = 0; float m_addT = 0;
     float todoRowH(const std::wstring& text, float maxW); // wrapped row height
     float rowHForTodo(int pi, int ti, float maxW);        // edit-aware todo row height
     float todoCircleY(const std::wstring& text, float rowTop, float maxW); // first-line circle center
+    float cardHeaderH() const; // project title/header height for the current text size
+    void applyCardTextSize();
     float editUnderlineDip() const; // underline y in content coordinates
     int editTextHeightPx() const;   // native EDIT text height in physical pixels
     void openHistory();

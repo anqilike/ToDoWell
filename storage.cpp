@@ -121,6 +121,10 @@ Config load_config() {
     if (sa && sa->type == JsonValue::Num) cfg.snap_anim = (int)sa->num;
     const JsonValue* dp = root.find(L"default_pos");
     if (dp && dp->type == JsonValue::Num) cfg.default_pos = (int)dp->num;
+    const JsonValue* ts = root.find(L"card_text_size");
+    if (ts && ts->type == JsonValue::Num) cfg.card_text_size = (int)ts->num;
+    if (cfg.card_text_size < 0) cfg.card_text_size = 0;
+    if (cfg.card_text_size > 3) cfg.card_text_size = 3;
     return cfg;
 }
 
@@ -130,10 +134,12 @@ void save_config(const Config& cfg) {
     JsonValue as; as.type = JsonValue::Bool; as.b = cfg.auto_start;
     JsonValue sa; sa.type = JsonValue::Num; sa.num = (double)cfg.snap_anim;
     JsonValue dp; dp.type = JsonValue::Num; dp.num = (double)cfg.default_pos;
+    JsonValue ts; ts.type = JsonValue::Num; ts.num = (double)cfg.card_text_size;
     root.obj.emplace_back(L"title_prefix", tp);
     root.obj.emplace_back(L"auto_start", as);
     root.obj.emplace_back(L"snap_anim", sa);
     root.obj.emplace_back(L"default_pos", dp);
+    root.obj.emplace_back(L"card_text_size", ts);
     write_file(exe_dir() + L"config.json", w_to_utf8(json_stringify(root, false)));
 }
 

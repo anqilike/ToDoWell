@@ -63,11 +63,13 @@ public:
     ID2D1SolidColorBrush* brush = nullptr;
     IDWriteTextFormat* fonts[F_COUNT] = {};
     float dpiScale = 1.0f;
+    float cardTextScale = 1.0f; // only project-card title/todo fonts
 
     bool init(HWND hwnd);
     bool recreate(HWND hwnd);
     void resize();
     void cleanup();
+    void setCardTextScale(float scale);
     IDWriteTextFormat* font(FontId id);
     // pt -> DIPs (96/72).
     static float pt(float p) { return p * 96.0f / 72.0f; }

@@ -40,10 +40,10 @@ bool Gfx::init(HWND hwnd) {
     const wchar_t* SY = L"Segoe UI Symbol";
     fonts[F_TITLE_BIG]   = makeFont(dw, YH, DWRITE_FONT_WEIGHT_BOLD, pt(11));
     fonts[F_TITLE_PRE]   = makeFont(dw, YH, DWRITE_FONT_WEIGHT_BOLD, pt(11));
-    fonts[F_PROJ_NAME]   = makeFont(dw, YH, DWRITE_FONT_WEIGHT_BOLD, pt(12));
+    fonts[F_PROJ_NAME]   = makeFont(dw, YH, DWRITE_FONT_WEIGHT_BOLD, pt(12) * cardTextScale);
     fonts[F_PROJ_NUM]    = makeFont(dw, YH, DWRITE_FONT_WEIGHT_BOLD, pt(9));
-    fonts[F_TODO]        = makeFont(dw, YH, DWRITE_FONT_WEIGHT_NORMAL, pt(10));
-    fonts[F_TODO_PH]     = makeFont(dw, YH, DWRITE_FONT_WEIGHT_NORMAL, pt(10));
+    fonts[F_TODO]        = makeFont(dw, YH, DWRITE_FONT_WEIGHT_NORMAL, pt(10) * cardTextScale);
+    fonts[F_TODO_PH]     = makeFont(dw, YH, DWRITE_FONT_WEIGHT_NORMAL, pt(10) * cardTextScale);
     fonts[F_SETTINGS]    = makeFont(dw, YH, DWRITE_FONT_WEIGHT_NORMAL, pt(10));
     fonts[F_HINT]        = makeFont(dw, YH, DWRITE_FONT_WEIGHT_NORMAL, pt(9));
     fonts[F_ABOUT_TITLE] = makeFont(dw, YH, DWRITE_FONT_WEIGHT_BOLD, pt(14));
@@ -66,6 +66,21 @@ void Gfx::resize() {
 bool Gfx::recreate(HWND hwnd) {
     cleanup();
     return init(hwnd);
+}
+
+void Gfx::setCardTextScale(float scale) {
+    if (scale < 0.8f) scale = 0.8f;
+    if (scale > 1.5f) scale = 1.5f;
+    cardTextScale = scale;
+    if (!dw) return;
+
+    const wchar_t* YH = L"Microsoft YaHei";
+    SafeRelease(fonts[F_PROJ_NAME]);
+    SafeRelease(fonts[F_TODO]);
+    SafeRelease(fonts[F_TODO_PH]);
+    fonts[F_PROJ_NAME] = makeFont(dw, YH, DWRITE_FONT_WEIGHT_BOLD, pt(12) * cardTextScale);
+    fonts[F_TODO]      = makeFont(dw, YH, DWRITE_FONT_WEIGHT_NORMAL, pt(10) * cardTextScale);
+    fonts[F_TODO_PH]   = makeFont(dw, YH, DWRITE_FONT_WEIGHT_NORMAL, pt(10) * cardTextScale);
 }
 
 void Gfx::cleanup() {
