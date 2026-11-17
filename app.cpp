@@ -22,6 +22,24 @@ static HFONT g_fontTodo = nullptr;
 static HFONT g_fontProj = nullptr;
 static HBRUSH g_whiteBrush = nullptr;
 static const float kCardTextScales[] = {0.90f, 1.00f, 1.15f, 1.30f};
+static const DWORD kTitleColors[] = {
+    0xFFEAA7, // 淡黄（默认）
+    0xCFEFE4, // 薄荷
+    0xD9EAFE, // 天蓝
+    0xE8DFF7, // 薰衣草
+    0xFFDCC4, // 蜜桃
+    0xF6D9E2, // 浅玫瑰
+};
+static const COLORREF kTransparentKey = RGB(1, 2, 3);
+static D2D1_COLOR_F TransparentKeyColor() {
+    return D2D1::ColorF(1.0f / 255.0f, 2.0f / 255.0f, 3.0f / 255.0f, 1.0f);
+}
+static D2D1_COLOR_F TitleBgColor(int index) {
+    int count = (int)(sizeof(kTitleColors) / sizeof(kTitleColors[0]));
+    if (index < 0) index = 0;
+    if (index >= count) index = count - 1;
+    return Hex(kTitleColors[index]);
+}
 // 版权署名：公开版为 anqilike；编译内部版时把这里改为 5014 即可全局生效。
 static const wchar_t* kCopyright = L"\u7248\u6743\u6240\u6709@\u5929\u624d\u7684anqilike";
 
@@ -33,6 +51,30 @@ void App::approach(float& cur, float target, float dt, float speed) {
     cur += (target - cur) * std::min(1.0f, dt * speed);
 }
 void App::requestRedraw() { if (m_hwnd) InvalidateRect(m_hwnd, nullptr, FALSE); }
+void App::applyWindowOpacity(BYTE alpha) {
+    if (!m_hwnd) return;
+    LONG_PTR ex = GetWindowLongPtrW(m_hwnd, GWL_EXSTYLE);
+    LONG_PTR wanted = (ex | WS_EX_LAYERED) & ~WS_EX_TRANSPARENT;
+    if (wanted != ex) {
+        // Keep the whole app clickable in transparent mode. The style change
+        // is applied only once, not on every animation frame.
+        SetWindowLongPtrW(m_hwnd, GWL_EXSTYLE, wanted);
+        SetWindowPos(m_hwnd, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+    }
+    if (m_cfg.transparent_bg) {
+        SetLayeredWindowAttributes(m_hwnd, kTransparentKey, alpha,
+                                   LWA_COLORKEY | LWA_ALPHA);
+    } else {
+        SetLayeredWindowAttributes(m_hwnd, 0, alpha, LWA_ALPHA);
+    }
+}
+void App::applyWindowTransparency() {
+    applyWindowOpacity(255);
+    PostMessageW(m_hwnd, WM_TODOWELL_TRANSPARENCY,
+                 m_cfg.transparent_bg ? 1 : 0, 0);
+    requestRedraw();
+}
 
 void App::clampScroll() {
     float mx = m_contentH - (m_h - AppC::TITLE_H - AppC::BOT_H);
@@ -48,7 +90,7 @@ void App::requestClose() {
     if (m_hidingToTray) {
         m_hidingToTray = false;
         m_hideAnim = 0;
-        SetLayeredWindowAttributes(m_hwnd, 0, 255, LWA_ALPHA);
+        applyWindowOpacity(255);
     }
     saveAll();
     m_closing = true;
@@ -61,7 +103,7 @@ void App::showFromTray(bool openSettingsPanel) {
         m_hidingToTray = false;
         m_hideAnim = 0;
     }
-    SetLayeredWindowAttributes(m_hwnd, 0, 255, LWA_ALPHA);
+    applyWindowOpacity(255);
     ShowWindow(m_hwnd, SW_SHOW);
     bringToFront();
     SetForegroundWindow(m_hwnd);
@@ -94,6 +136,7 @@ bool App::animating() const {
     if (m_hidingToTray) return true;
     if (m_draggingCard) return true;
     if (m_cardDropAnimating) return true;
+    if (m_draggingTodo) return true;
     if (m_snapping) return true;
     // Keep repainting while the overlay shade fades in OR out, so the main
     // page never gets stuck dimmed after closing settings/about.
@@ -166,6 +209,7 @@ void App::create(HWND hwnd) {
     m_h = g_gfx.clientH();
     refreshImeMode(); // 打开时立即识别当前输入法（搜狗走传统路径，微软拼音走自绘路径）
     applyCardTextSize();
+    applyWindowTransparency();
 }
 void App::destroy() {
     saveAll();
@@ -360,7 +404,8 @@ void App::beginEdit(EditMode mode, int pi, int ti, const std::wstring& initial) 
         float dlgX = (m_w - dlgW) / 2.0f, dlgY = (m_h - dlgH) / 2.0f;
         float sy = -m_setScroll;
         float cy = dlgY + 14.0f + sy, cb = 18.0f;
-        float ly = cy + cb + 8.0f;
+        float bgY = cy + cb + 8.0f;
+        float ly = bgY + cb + 8.0f;
         float fy = ly + 18.0f;
         m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
     } else {
@@ -957,6 +1002,109 @@ void App::beginCardDrag(int pi, float contentY) {
     SetCapture(m_hwnd);
     requestRedraw();
 }
+void App::clearTodoDragState() {
+    if (m_todoDragArmed || m_draggingTodo) ReleaseCapture();
+    m_todoDragArmed = false;
+    m_draggingTodo = false;
+    m_todoDragPi = -1;
+    m_todoDragFrom = -1;
+    m_todoDragTarget = -1;
+    m_todoDragStartY = 0;
+    m_todoDragGrabOffset = 0;
+    m_todoDragCurrentY = 0;
+    m_todoDragMinY = 0;
+    m_todoDragMaxY = 0;
+    m_todoDragRowH = 0;
+    m_todoDragRects.clear();
+}
+void App::armTodoDrag(int pi, int ti, float contentY) {
+    if (m_draggingCard || m_cardDropAnimating || !m_fades.empty() ||
+        pi < 0 || pi >= (int)m_projects.size() ||
+        ti < 0 || ti >= (int)m_projects[pi].todos.size()) return;
+    clearTodoDragState();
+    m_todoDragArmed = true;
+    m_todoDragPi = pi;
+    m_todoDragFrom = ti;
+    m_todoDragTarget = ti;
+    m_todoDragStartY = contentY;
+    SetCapture(m_hwnd);
+}
+void App::beginTodoDrag(float contentY) {
+    if (!m_todoDragArmed || m_todoDragPi < 0 || m_todoDragFrom < 0 ||
+        m_todoDragPi >= (int)m_projects.size() ||
+        m_todoDragFrom >= (int)m_projects[m_todoDragPi].todos.size() || !m_fades.empty()) {
+        clearTodoDragState();
+        return;
+    }
+    m_todoDragRects.clear();
+    for (const auto& h : m_hits) {
+        if (h.type == H_TODO_TEXT && h.pi == m_todoDragPi)
+            m_todoDragRects.push_back(h.rc);
+    }
+    if (m_todoDragFrom >= (int)m_todoDragRects.size()) {
+        clearTodoDragState();
+        return;
+    }
+    const D2D1_RECT_F row = m_todoDragRects[m_todoDragFrom];
+    m_todoDragRowH = row.bottom - row.top;
+    m_todoDragGrabOffset = contentY - row.top;
+    if (m_todoDragGrabOffset < 0) m_todoDragGrabOffset = 0;
+    if (m_todoDragGrabOffset > m_todoDragRowH) m_todoDragGrabOffset = m_todoDragRowH;
+    m_todoDragMinY = m_todoDragRects.front().top;
+    m_todoDragMaxY = m_todoDragRects.back().bottom - m_todoDragRowH;
+    if (m_todoDragMaxY < m_todoDragMinY) m_todoDragMaxY = m_todoDragMinY;
+    m_todoDragCurrentY = std::max(m_todoDragMinY,
+                                  std::min(m_todoDragMaxY, contentY - m_todoDragGrabOffset));
+    m_todoDragTarget = m_todoDragFrom;
+    m_todoDragArmed = false;
+    m_draggingTodo = true;
+    m_suppressCircleHover = true;
+    m_hovCircPi = -1; m_hovCircTi = -2; m_circT = 0;
+    m_hoverProjDel = -1; m_projDelT = 0;
+    SetCapture(m_hwnd);
+    updateTodoDrag(contentY);
+}
+void App::updateTodoDrag(float contentY) {
+    if (!m_draggingTodo) return;
+    m_todoDragCurrentY = std::max(m_todoDragMinY,
+                                  std::min(m_todoDragMaxY, contentY - m_todoDragGrabOffset));
+    int target = (int)m_todoDragRects.size();
+    for (size_t i = 0; i < m_todoDragRects.size(); ++i) {
+        float center = (m_todoDragRects[i].top + m_todoDragRects[i].bottom) * 0.5f;
+        if (contentY < center) { target = (int)i; break; }
+    }
+    m_todoDragTarget = target;
+    SetCursor(LoadCursorW(nullptr, IDC_SIZENS));
+    requestRedraw();
+}
+void App::finishTodoDrag() {
+    if (!m_draggingTodo) {
+        clearTodoDragState();
+        return;
+    }
+    ReleaseCapture();
+    int pi = m_todoDragPi;
+    int from = m_todoDragFrom;
+    int to = m_todoDragTarget;
+    if (pi >= 0 && pi < (int)m_projects.size() &&
+        from >= 0 && from < (int)m_projects[pi].todos.size()) {
+        int count = (int)m_projects[pi].todos.size();
+        if (to < 0) to = 0;
+        if (to > count) to = count;
+        if (to > from) --to;
+        if (to < 0) to = 0;
+        if (to >= count) to = count - 1;
+        if (to != from) {
+            TodoItem moved = m_projects[pi].todos[from];
+            m_projects[pi].todos.erase(m_projects[pi].todos.begin() + from);
+            m_projects[pi].todos.insert(m_projects[pi].todos.begin() + to, moved);
+            saveAll();
+        }
+    }
+    clearTodoDragState();
+    rebuildHits();
+    requestRedraw();
+}
 float App::drawProjectCard(Gfx& g, int pi, float yContent, bool floating) {
     auto& proj = m_projects[pi];
     float cTop = AppC::TITLE_H;
@@ -976,13 +1124,15 @@ float App::drawProjectCard(Gfx& g, int pi, float yContent, bool floating) {
     float scrTop = cTop + yContent - scrollOff;
     float scrBot = cTop + cardContentBot - scrollOff;
     D2D1_RECT_F cardRc = D2D1::RectF(contentLeft, scrTop, contentLeft + contentW, scrBot);
-    if (floating) {
+    if (floating && !m_cfg.transparent_bg) {
         g.fillRoundedRect(D2D1::RectF(contentLeft + 3.0f, scrTop + 5.0f,
                                       contentLeft + contentW + 3.0f, scrBot + 5.0f),
                           8.0f, D2D1::ColorF(0, 0, 0, 0.12f));
     }
-    g.fillRoundedRect(cardRc, 8.0f, C::WHITE);
-    if (floating) g.strokeRoundedRect(cardRc, 8.0f, C::ACCENT, 2.0f);
+    if (m_cfg.transparent_bg) g.fillRect(cardRc, TransparentKeyColor());
+    else g.fillRoundedRect(cardRc, 8.0f, C::WHITE);
+    if (floating) g.strokeRoundedRect(cardRc, 8.0f,
+                                      m_cfg.transparent_bg ? C::TEXT : C::ACCENT, 2.0f);
     float hy = yContent + AppC::CARD_TOP;
     float screenHy = cTop + hy - scrollOff;
     float badgeX = contentLeft + AppC::CARD_INNER;
@@ -991,15 +1141,18 @@ float App::drawProjectCard(Gfx& g, int pi, float yContent, bool floating) {
     float badgeW = std::max(AppC::BADGE_MIN_W, tw + 12.0f);
     DWORD col = C::PROJ_COLORS[pi % 8];
     float badgeY = screenHy + (headerH - AppC::BADGE_H) * 0.5f;
-    g.fillRoundedRect(D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + AppC::BADGE_H), 4.0f, Hex(col));
-    g.drawText(num, D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + AppC::BADGE_H), F_PROJ_NUM, C::WHITE,
+    if (!m_cfg.transparent_bg)
+        g.fillRoundedRect(D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + AppC::BADGE_H), 4.0f, Hex(col));
+    g.drawText(num, D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + AppC::BADGE_H), F_PROJ_NUM,
+               m_cfg.transparent_bg ? C::TEXT : C::WHITE,
                DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
     float nameX = badgeX + badgeW + 6.0f;
     float delW = 22.0f;
     float nameRight = contentLeft + contentW - AppC::CARD_INNER - delW;
     g.drawText(proj.name, D2D1::RectF(nameX, screenHy, nameRight, screenHy + headerH), F_PROJ_NAME, C::TEXT);
     float delX = contentLeft + contentW - AppC::CARD_INNER - delW;
-    D2D1_COLOR_F delCol = lerpColor(C::DEL_BTN, C::DEL_HOVER, m_projDelT);
+    D2D1_COLOR_F delCol = lerpColor(m_cfg.transparent_bg ? C::TEXT : C::DEL_BTN,
+                                    C::DEL_HOVER, m_projDelT);
     D2D1_RECT_F delRc = D2D1::RectF(delX, screenHy, delX + delW, screenHy + headerH);
     g.drawText(L"\u2715", delRc, F_SYM_TITLE, delCol,
                DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
@@ -1008,7 +1161,8 @@ float App::drawProjectCard(Gfx& g, int pi, float yContent, bool floating) {
         float rh = rowHForTodo(pi, (int)ti, textRightRow - textXRow);
         float cy = todoCircleY(proj.todos[ti].text, y, textRightRow - textXRow);
         float sy = cTop + y - scrollOff;
-        g.drawEllipse(cxRow, cy + (cTop - scrollOff), AppC::CIRCLE_R, AppC::CIRCLE_R, C::CIRCLE, 1.8f);
+        g.drawEllipse(cxRow, cy + (cTop - scrollOff), AppC::CIRCLE_R, AppC::CIRCLE_R,
+                      m_cfg.transparent_bg ? C::TEXT : C::CIRCLE, 1.8f);
         g.drawText(proj.todos[ti].text, D2D1::RectF(textXRow, sy, textRightRow, sy + rh), F_TODO, C::TEXT,
                    DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         y += rh;
@@ -1016,7 +1170,8 @@ float App::drawProjectCard(Gfx& g, int pi, float yContent, bool floating) {
     float ntTop = y;
     float cy = ntTop + AppC::ROW_H / 2.0f;
     float sy = cTop + ntTop - scrollOff;
-    g.drawEllipse(cxRow, cy + (cTop - scrollOff), AppC::CIRCLE_R, AppC::CIRCLE_R, C::CIRCLE, 1.5f);
+    g.drawEllipse(cxRow, cy + (cTop - scrollOff), AppC::CIRCLE_R, AppC::CIRCLE_R,
+                  m_cfg.transparent_bg ? C::TEXT : C::CIRCLE, 1.5f);
     y += ntH + 4.0f + 6.0f + AppC::CARD_GAP;
     return y;
 }
@@ -1112,11 +1267,14 @@ void App::render() {
     float W = g.clientW(), H = g.clientH();
     g.rt->BeginDraw();
     // 用不透明的页面背景清屏：Win7 上透明黑清屏会在栏边界露出黑线。
-    g.rt->Clear(D2D1::ColorF(C::PAGE.r, C::PAGE.g, C::PAGE.b, 1.0f));
-    g.fillRect(D2D1::RectF(0, 0, W, H), C::PAGE);
+    D2D1_COLOR_F pageBg = m_cfg.transparent_bg ? TransparentKeyColor()
+                                               : D2D1::ColorF(C::PAGE.r, C::PAGE.g, C::PAGE.b, 1.0f);
+    g.rt->Clear(pageBg);
+    g.fillRect(D2D1::RectF(0, 0, W, H), pageBg);
 
     // title bar
-    g.fillRect(D2D1::RectF(0, 0, W, AppC::TITLE_H), C::TITLE_BG);
+    if (!m_cfg.transparent_bg)
+        g.fillRect(D2D1::RectF(0, 0, W, AppC::TITLE_H), TitleBgColor(m_cfg.title_color));
     float tx = 12.0f;
     if (!m_cfg.title_prefix.empty()) {
         g.drawText(m_cfg.title_prefix, D2D1::RectF(tx, 0, tx + 200, AppC::TITLE_H), F_TITLE_PRE, C::TITLE_FG);
@@ -1132,7 +1290,8 @@ void App::render() {
     D2D1_COLOR_F snapCol = lerpColor(C::TITLE_FG, C::ACCENT, m_snapT);
     g.drawText(L"\u2192", D2D1::RectF(snapX, btnY1, snapX + snapW, btnY2), F_SYM_TITLE, snapCol,
                DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-    D2D1_COLOR_F closeCol = lerpColor(C::DEL_BTN, C::DEL_HOVER, m_closeT);
+    D2D1_COLOR_F closeCol = lerpColor(m_cfg.transparent_bg ? C::TEXT : C::DEL_BTN,
+                                      C::DEL_HOVER, m_closeT);
     g.drawText(L"\u2715", D2D1::RectF(closeX, btnY1, closeX + closeW, btnY2), F_SYM_TITLE, closeCol,
                DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
 
@@ -1142,7 +1301,7 @@ void App::render() {
     float contentLeft = AppC::CONTENT_PAD;
     float contentW = W - 2 * AppC::CONTENT_PAD;
     g.rt->PushAxisAlignedClip(D2D1::RectF(0, cTop, W, cBot), D2D1_ANTIALIAS_MODE_PER_PRIMITIVE);
-    g.fillRect(D2D1::RectF(0, cTop, W, cBot), C::PAGE);
+    if (!m_cfg.transparent_bg) g.fillRect(D2D1::RectF(0, cTop, W, cBot), C::PAGE);
 
     float scrollOff = m_scroll;
     float y = AppC::CONTENT_TOP;
@@ -1169,12 +1328,13 @@ void App::render() {
         float scrTop = cTop + y - scrollOff;
         float scrBot = cTop + cardContentBot - scrollOff;
         D2D1_RECT_F cardRc = D2D1::RectF(contentLeft, scrTop, contentLeft + contentW, scrBot);
-        if (m_draggingCard || m_cardDropAnimating) {
+        if ((m_draggingCard || m_cardDropAnimating) && !m_cfg.transparent_bg) {
             g.fillRoundedRect(D2D1::RectF(contentLeft + 3.0f, scrTop + 5.0f,
                                           contentLeft + contentW + 3.0f, scrBot + 5.0f),
                               8.0f, D2D1::ColorF(0, 0, 0, 0.10f));
         }
-        g.fillRoundedRect(cardRc, 8.0f, C::WHITE);
+        if (m_cfg.transparent_bg) g.fillRect(cardRc, TransparentKeyColor());
+        else g.fillRoundedRect(cardRc, 8.0f, C::WHITE);
         if (m_draggingCard && (int)pi == m_dragPi)
             g.strokeRoundedRect(cardRc, 8.0f, C::ACCENT, 2.0f);
         float hy = y + AppC::CARD_TOP;
@@ -1185,8 +1345,10 @@ void App::render() {
         float badgeW = std::max(AppC::BADGE_MIN_W, tw + 12.0f);
         DWORD col = C::PROJ_COLORS[pi % 8];
         float badgeY = screenHy + (headerH - AppC::BADGE_H) * 0.5f;
-        g.fillRoundedRect(D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + AppC::BADGE_H), 4.0f, Hex(col));
-        g.drawText(num, D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + AppC::BADGE_H), F_PROJ_NUM, C::WHITE,
+        if (!m_cfg.transparent_bg)
+            g.fillRoundedRect(D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + AppC::BADGE_H), 4.0f, Hex(col));
+        g.drawText(num, D2D1::RectF(badgeX, badgeY, badgeX + badgeW, badgeY + AppC::BADGE_H), F_PROJ_NUM,
+                   m_cfg.transparent_bg ? C::TEXT : C::WHITE,
                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         float nameX = badgeX + badgeW + 6.0f;
         float delW = 22.0f;
@@ -1201,7 +1363,8 @@ void App::render() {
             g.drawText(proj.name, D2D1::RectF(nameX, screenHy, nameRight, screenHy + headerH), F_PROJ_NAME, C::TEXT);
         }
         float delX = contentLeft + contentW - AppC::CARD_INNER - delW;
-        D2D1_COLOR_F delCol = lerpColor(C::DEL_BTN, C::DEL_HOVER, m_projDelT);
+        D2D1_COLOR_F delCol = lerpColor(m_cfg.transparent_bg ? C::TEXT : C::DEL_BTN,
+                                        C::DEL_HOVER, m_projDelT);
         D2D1_RECT_F delRc = D2D1::RectF(delX, screenHy, delX + delW, screenHy + headerH);
         D2D1_POINT_2F delOff = IconInkCenterOffset(g, F_SYM_TITLE, L"\u2715");
         D2D1_POINT_2F delC = { delRc.left + (delRc.right - delRc.left) * 0.5f + delOff.x,
@@ -1233,13 +1396,24 @@ void App::render() {
                 continue;
             }
             float rowTop = y;
+            bool draggedRow = m_draggingTodo && (int)pi == m_todoDragPi && (int)ti == m_todoDragFrom;
+            if (draggedRow) {
+                float sy = cTop + rowTop - scrollOff;
+                if (!m_cfg.transparent_bg)
+                    g.fillRoundedRect(D2D1::RectF(contentLeft + AppC::CARD_INNER, sy + 1,
+                                                  textRightRow, sy + rh - 1),
+                                      5.0f, D2D1::ColorF(0, 0, 0, 0.035f));
+                y += rh;
+                continue;
+            }
             std::wstring dispText = proj.todos[ti].text;
             if (m_editMode == ED_EDIT_TODO && m_editPi == (int)pi && m_editTi == (int)ti)
                 dispText = m_editText + m_compositionText;
             float cy = todoCircleY(dispText, rowTop, textRightRow - textXRow);
             float sy = cTop + rowTop - scrollOff;
             bool hov = (m_hovCircPi == (int)pi && m_hovCircTi == (int)ti);
-            D2D1_COLOR_F cc = hov ? lerpColor(C::CIRCLE, C::ACCENT, m_circT) : C::CIRCLE;
+            D2D1_COLOR_F circleBase = m_cfg.transparent_bg ? C::TEXT : C::CIRCLE;
+            D2D1_COLOR_F cc = hov ? lerpColor(circleBase, C::ACCENT, m_circT) : circleBase;
             g.drawEllipse(cxRow, cy + (cTop - scrollOff), AppC::CIRCLE_R, AppC::CIRCLE_R, cc, 1.8f);
             if (!(m_editMode == ED_EDIT_TODO && m_editPi == (int)pi && m_editTi == (int)ti)) {
                 g.drawText(proj.todos[ti].text, D2D1::RectF(textXRow, sy, textRightRow, sy + rh), F_TODO, C::TEXT,
@@ -1255,11 +1429,46 @@ void App::render() {
             }
             y += rh;
         }
+        if (m_draggingTodo && (int)pi == m_todoDragPi && !m_todoDragRects.empty() &&
+            m_todoDragFrom >= 0 && m_todoDragFrom < (int)proj.todos.size()) {
+            int target = m_todoDragTarget;
+            if (target < 0) target = 0;
+            if (target > (int)m_todoDragRects.size()) target = (int)m_todoDragRects.size();
+            float lineContentY = (target < (int)m_todoDragRects.size())
+                                 ? m_todoDragRects[target].top
+                                 : m_todoDragRects.back().bottom;
+            float lineY = cTop + lineContentY - scrollOff;
+            g.drawLine(textXRow, lineY, textRightRow, lineY, C::ACCENT, 2.0f);
+
+            const std::wstring& dragText = proj.todos[m_todoDragFrom].text;
+            float floatTop = cTop + m_todoDragCurrentY - scrollOff;
+            D2D1_RECT_F floatRc = D2D1::RectF(contentLeft + AppC::CARD_INNER, floatTop,
+                                               textRightRow, floatTop + m_todoDragRowH);
+            if (m_cfg.transparent_bg) {
+                g.fillRect(floatRc, TransparentKeyColor());
+            } else {
+                g.fillRoundedRect(D2D1::RectF(floatRc.left + 2, floatRc.top + 3,
+                                              floatRc.right + 2, floatRc.bottom + 3),
+                                  5.0f, D2D1::ColorF(0, 0, 0, 0.12f));
+                g.fillRoundedRect(floatRc, 5.0f, C::WHITE);
+            }
+            g.strokeRoundedRect(floatRc, 5.0f,
+                                m_cfg.transparent_bg ? C::TEXT : C::ACCENT, 1.5f);
+            float dragCircleY = todoCircleY(dragText, m_todoDragCurrentY,
+                                            textRightRow - textXRow) + (cTop - scrollOff);
+            g.drawEllipse(cxRow, dragCircleY, AppC::CIRCLE_R, AppC::CIRCLE_R,
+                          m_cfg.transparent_bg ? C::TEXT : C::ACCENT, 1.8f);
+            g.drawText(dragText, D2D1::RectF(textXRow, floatTop, textRightRow,
+                                             floatTop + m_todoDragRowH),
+                       F_TODO, C::TEXT, DWRITE_TEXT_ALIGNMENT_LEADING,
+                       DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        }
         {
             float ntTop = y;
             float cy = ntTop + AppC::ROW_H / 2.0f;
             float sy = cTop + ntTop - scrollOff;
-            g.drawEllipse(cxRow, cy + (cTop - scrollOff), AppC::CIRCLE_R, AppC::CIRCLE_R, C::CIRCLE, 1.5f);
+            g.drawEllipse(cxRow, cy + (cTop - scrollOff), AppC::CIRCLE_R, AppC::CIRCLE_R,
+                          m_cfg.transparent_bg ? C::TEXT : C::CIRCLE, 1.5f);
             if (m_editMode == ED_NEW_TODO && m_editPi == (int)pi) {
                 g.drawLine(textXRow, sy + ntH - 2, textRightRow, sy + ntH - 2, C::ACCENT, 1.5f);
                 std::wstring dtext = m_editText + m_compositionText;
@@ -1287,10 +1496,14 @@ void App::render() {
         float screenTop = cTop + y - scrollOff;
         float screenBot = screenTop + AppC::BADGE_H + 14.0f;
         D2D1_RECT_F cardRc = D2D1::RectF(contentLeft, screenTop, contentLeft + contentW, screenBot);
-        g.fillRoundedRect(cardRc, 8.0f, C::WHITE);
-        g.fillRect(D2D1::RectF(contentLeft, screenTop, contentLeft + 4.0f, screenBot), C::ACCENT);
+        if (m_cfg.transparent_bg) g.fillRect(cardRc, TransparentKeyColor());
+        else {
+            g.fillRoundedRect(cardRc, 8.0f, C::WHITE);
+            g.fillRect(D2D1::RectF(contentLeft, screenTop, contentLeft + 4.0f, screenBot), C::ACCENT);
+        }
         if (m_editMode != ED_ADD_PROJECT) {
-            g.drawText(L"\u65b0\u9879\u76ee\u540d\u79f0", D2D1::RectF(contentLeft + AppC::CARD_INNER + 8.0f, screenTop, contentLeft + contentW - AppC::CARD_INNER, screenBot), F_PROJ_NAME, C::MUTED);
+            g.drawText(L"\u65b0\u9879\u76ee\u540d\u79f0", D2D1::RectF(contentLeft + AppC::CARD_INNER + 8.0f, screenTop, contentLeft + contentW - AppC::CARD_INNER, screenBot), F_PROJ_NAME,
+                       m_cfg.transparent_bg ? C::TEXT : C::MUTED);
         } else {
             float ex = contentLeft + AppC::CARD_INNER + 8.0f;
             float ew = contentW - AppC::CARD_INNER * 2 - 8.0f;
@@ -1305,7 +1518,7 @@ void App::render() {
     g.rt->PopAxisAlignedClip();
 
     // bottom bar
-    g.fillRect(D2D1::RectF(0, H - AppC::BOT_H, W, H), C::PAGE);
+    if (!m_cfg.transparent_bg) g.fillRect(D2D1::RectF(0, H - AppC::BOT_H, W, H), C::PAGE);
     // Rotate each icon around its own ink center (measured via glyph run
     // analysis), not the button rect center.
     D2D1_COLOR_F addCol = lerpColor(C::TEXT, C::ACCENT, m_addT);
@@ -1350,7 +1563,18 @@ void App::render() {
         }
         g.drawText(L"\u5f00\u673a\u81ea\u52a8\u542f\u52a8", D2D1::RectF(cbX + cb + 8, cy, dlgX + dlgW - 24, cy + cb), F_SETTINGS, D2D1::ColorF(C::DIALOG_TX.r, C::DIALOG_TX.g, C::DIALOG_TX.b, oa),
                    DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
-        float ly = cy + cb + 8.0f;
+        float bgY = cy + cb + 8.0f;
+        g.strokeRoundedRect(D2D1::RectF(cbX, bgY, cbX + cb, bgY + cb), 4.0f, D2D1::ColorF(C::INPUT_BD.r, C::INPUT_BD.g, C::INPUT_BD.b, oa), 1.2f);
+        if (m_cfg.transparent_bg) {
+            g.fillRoundedRect(D2D1::RectF(cbX, bgY, cbX + cb, bgY + cb), 4.0f, D2D1::ColorF(C::ACCENT.r, C::ACCENT.g, C::ACCENT.b, oa));
+            g.drawText(L"\u2713", D2D1::RectF(cbX, bgY - 2, cbX + cb, bgY + cb), F_SYM_CHECK, D2D1::ColorF(1, 1, 1, oa),
+                       DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        }
+        g.drawText(L"\u80cc\u666f\u900f\u660e\uff08\u663e\u793a\u684c\u9762\uff09",
+                   D2D1::RectF(cbX + cb + 8, bgY, dlgX + dlgW - 24, bgY + cb), F_SETTINGS,
+                   D2D1::ColorF(C::DIALOG_TX.r, C::DIALOG_TX.g, C::DIALOG_TX.b, oa),
+                   DWRITE_TEXT_ALIGNMENT_LEADING, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
+        float ly = bgY + cb + 8.0f;
         g.drawText(L"\u6807\u9898\u524d\u7f00\uff08\u6700\u591a5\u4e2a\u6c49\u5b57\uff09\uff1a", D2D1::RectF(dlgX + 16, ly, dlgX + dlgW - 16, ly + 16), F_HINT, D2D1::ColorF(C::DIALOG_MM.r, C::DIALOG_MM.g, C::DIALOG_MM.b, oa));
         float fy = ly + 18.0f;
         g.fillRoundedRect(D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26), 4.0f, D2D1::ColorF(1, 1, 1, oa));
@@ -1369,7 +1593,7 @@ void App::render() {
                 g.drawLine(dlgX + 22 + tw + cw + 1, fy + 3, dlgX + 22 + tw + cw + 1, fy + 23, D2D1::ColorF(C::ACCENT.r, C::ACCENT.g, C::ACCENT.b, oa), 1.5f);
         }
         float tsTitleY = fy + 26 + 10.0f;
-        g.drawText(L"\u5361\u7247\u6587\u5b57\u5927\u5c0f\uff1a",
+        g.drawText(L"\u5361\u7247\u6587\u5b57\u5927\u5c0f\uff08\u4ec5\u5361\u7247\uff09\uff1a",
                    D2D1::RectF(dlgX + 16, tsTitleY, dlgX + dlgW - 16, tsTitleY + 16),
                    F_HINT, D2D1::ColorF(C::DIALOG_MM.r, C::DIALOG_MM.g, C::DIALOG_MM.b, oa));
         const wchar_t* sizeNames[] = { L"\u5c0f", L"\u6807\u51c6", L"\u5927", L"\u7279\u5927" };
@@ -1388,10 +1612,24 @@ void App::render() {
                        DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         }
         float tsHintY = tsY + tsH + 4.0f;
-        g.drawText(L"\u4ec5\u5f71\u54cd\u9879\u76ee\u5361\u7247\u5185\u6587\u5b57",
-                   D2D1::RectF(dlgX + 16, tsHintY, dlgX + dlgW - 16, tsHintY + 14),
+        float tcTitleY = tsHintY + 8.0f;
+        g.drawText(L"\u9876\u90e8\u989c\u8272\uff1a",
+                   D2D1::RectF(dlgX + 16, tcTitleY, dlgX + dlgW - 16, tcTitleY + 16),
                    F_HINT, D2D1::ColorF(C::DIALOG_MM.r, C::DIALOG_MM.g, C::DIALOG_MM.b, oa));
-        float ay = tsHintY + 20.0f;
+        float swY = tcTitleY + 16.0f;
+        for (int i = 0; i < 6; ++i) {
+            float cx = dlgX + 31.0f + i * 31.0f;
+            float cy = swY + 13.0f;
+            bool selected = (m_cfg.title_color == i);
+            if (selected) g.fillEllipse(cx, cy, 12.0f, 12.0f,
+                                        D2D1::ColorF(C::ACCENT.r, C::ACCENT.g, C::ACCENT.b, oa));
+            D2D1_COLOR_F sw = TitleBgColor(i);
+            g.fillEllipse(cx, cy, selected ? 9.0f : 10.0f, selected ? 9.0f : 10.0f,
+                          D2D1::ColorF(sw.r, sw.g, sw.b, oa));
+            if (!selected) g.drawEllipse(cx, cy, 10.0f, 10.0f,
+                                         D2D1::ColorF(C::INPUT_BD.r, C::INPUT_BD.g, C::INPUT_BD.b, oa), 1.0f);
+        }
+        float ay = swY + 26.0f + 8.0f;
         float say = ay;
         g.drawText(L"\u5f52\u4f4d\u52a8\u753b\uff1a", D2D1::RectF(dlgX + 16, say, dlgX + dlgW - 16, say + 16), F_HINT, D2D1::ColorF(C::DIALOG_MM.r, C::DIALOG_MM.g, C::DIALOG_MM.b, oa));
         say += 18.0f;
@@ -1451,7 +1689,7 @@ void App::render() {
                    D2D1::ColorF(C::TITLE_FG.r, C::TITLE_FG.g, C::TITLE_FG.b, oa),
                    DWRITE_TEXT_ALIGNMENT_CENTER, DWRITE_PARAGRAPH_ALIGNMENT_CENTER);
         g.rt->PopAxisAlignedClip();
-        g.drawText(L"\u7248\u672c 2.5.13", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.15", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         if (m_editMode == ED_PREF_PREFIX) m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
         float posBottom = noteY + noteH;
@@ -1473,10 +1711,10 @@ void App::render() {
         ty += 34.0f;
         const wchar_t* feats[] = {
             L"\u2022 项目分类管理：新建、双击改名、一键删除，8 色编号徽标",
-            L"\u2022 待办任务：点击圆圈完成（淡出动画）、单击编辑、回车连续新增",
+            L"\u2022 待办任务：点击圆圈完成、单击编辑、上下拖动调整重要程度",
             L"\u2022 中文输入法：拼音组合与候选框跟随光标，Win7 / Win11 均正常",
             L"\u2022 自绘 UI 与动画：Direct2D 硬件加速，归位动画、关闭淡出、悬停旋转",
-            L"\u2022 设置面板：开机自启、标题前缀、卡片文字大小、动画一键切换",
+            L"\u2022 设置面板：开机自启、标题前缀、卡片文字大小、顶部颜色、背景透明",
             L"\u2022 数据持久化：todos.json / config.json 即时写入，删除即可重置",
             L"\u2022 轻量单文件：约 400 KB 单 exe，免安装、免联网、无第三方依赖",
             L"\u2022 平台兼容：Windows 7 SP1+ / Windows 11，支持高 DPI",
@@ -1493,7 +1731,7 @@ void App::render() {
         }
         g.rt->PopAxisAlignedClip();
         m_aboutContentH = (ty - sy) - dlgY + 10.0f;
-        g.drawText(L"\u7248\u672c 2.5.13", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
+        g.drawText(L"\u7248\u672c 2.5.15", D2D1::RectF(dlgX + 16, dlgY + dlgH - 34, dlgX + dlgW - 16, dlgY + dlgH - 20), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
         g.drawText(kCopyright, D2D1::RectF(dlgX + 16, dlgY + dlgH - 20, dlgX + dlgW - 16, dlgY + dlgH - 6), F_FOOTER, D2D1::ColorF(C::DIALOG_FT.r, C::DIALOG_FT.g, C::DIALOG_FT.b, oa));
     }
 
@@ -1695,7 +1933,7 @@ void App::tick(float dt) {
         if (m_snapAnim >= 1.0f) {
             m_snapAnim = 1.0f;
             m_snapping = false;
-            if (m_cfg.snap_anim == 1) SetLayeredWindowAttributes(m_hwnd, 0, 255, LWA_ALPHA);
+            if (m_cfg.snap_anim == 1) applyWindowOpacity(255);
             m_snapScale = 1.0f;
             m_snapRightArmed = false; m_snapBottomArmed = false;
         }
@@ -1716,7 +1954,7 @@ void App::tick(float dt) {
                     if (!(ex & WS_EX_LAYERED)) SetWindowLongPtrW(m_hwnd, GWL_EXSTYLE, ex | WS_EX_LAYERED);
                 }
                 float alphaF = (t < 0.5f) ? 1.0f - (t / 0.5f) * (t / 0.5f) : ((t - 0.5f) / 0.5f) * ((t - 0.5f) / 0.5f);
-                SetLayeredWindowAttributes(m_hwnd, 0, (BYTE)(255.0f * alphaF), LWA_ALPHA);
+                applyWindowOpacity((BYTE)(255.0f * alphaF));
                 if (t >= 0.5f) {
                     float ease = 1.0f - (1.0f - (t - 0.5f) / 0.5f) * (1.0f - (t - 0.5f) / 0.5f);
                     float dist = (float)std::hypot((double)(m_snapToX - m_snapFromX), (double)(m_snapToY - m_snapFromY));
@@ -1780,12 +2018,12 @@ void App::tick(float dt) {
         }
         float fadeT = m_hideAnim < 0.15f ? 0.0f : (m_hideAnim - 0.15f) / 0.85f;
         BYTE alpha = (BYTE)(255.0f * (1.0f - fadeT * fadeT * fadeT * fadeT));
-        SetLayeredWindowAttributes(m_hwnd, 0, alpha, LWA_ALPHA);
+        applyWindowOpacity(alpha);
         m_hideAnim += dt / 0.45f;
         if (m_hideAnim >= 1.0f) {
             m_hidingToTray = false;
             m_hideAnim = 0;
-            SetLayeredWindowAttributes(m_hwnd, 0, 255, LWA_ALPHA);
+            applyWindowOpacity(255);
             ShowWindow(m_hwnd, SW_HIDE);
         }
     }
@@ -1796,7 +2034,7 @@ void App::tick(float dt) {
         }
         float fadeT = m_closeAnim < 0.15f ? 0.0f : (m_closeAnim - 0.15f) / 0.85f;
         BYTE alpha = (BYTE)(255.0f * (1.0f - fadeT * fadeT * fadeT * fadeT));
-        SetLayeredWindowAttributes(m_hwnd, 0, alpha, LWA_ALPHA);
+        applyWindowOpacity(alpha);
         m_closeAnim += dt / 0.45f;
         if (m_closeAnim >= 1.0f) {
             m_closing = false;
@@ -1927,6 +2165,12 @@ static bool inRect(float x, float y, const D2D1_RECT_F& r) {
 void App::onMouseMove(float x, float y) {
     bool moved = (std::abs(x - m_lastMouseX) > 0.5f || std::abs(y - m_lastMouseY) > 0.5f);
     m_lastMouseX = x; m_lastMouseY = y;
+    if (m_todoDragArmed || m_draggingTodo) {
+        float contentY = y - AppC::TITLE_H + m_scroll;
+        if (m_draggingTodo) updateTodoDrag(contentY);
+        else if (std::abs(contentY - m_todoDragStartY) >= 4.0f) beginTodoDrag(contentY);
+        return;
+    }
     if (m_draggingCard) {
         if (moved) {
             m_dragMouseContentY = y - AppC::TITLE_H + m_scroll;
@@ -1989,7 +2233,24 @@ void App::onMouseMove(float x, float y) {
     if (m_suppressCircleHover) { if (m_hovCircPi >= 0) m_circT = 0; m_hovCircPi = -1; m_hovCircTi = -2; }
     requestRedraw(); // hover states change -> repaint so highlights appear
 }
-void App::onLButtonUp(float, float) {
+void App::onLButtonUp(float x, float y) {
+    if (m_draggingTodo) {
+        finishTodoDrag();
+        return;
+    }
+    if (m_todoDragArmed) {
+        int pi = m_todoDragPi;
+        int ti = m_todoDragFrom;
+        clearTodoDragState();
+        if (pi >= 0 && pi < (int)m_projects.size() &&
+            ti >= 0 && ti < (int)m_projects[pi].todos.size()) {
+            float contentY = y - AppC::TITLE_H + m_scroll;
+            startEdit(ED_EDIT_TODO, pi, ti, m_projects[pi].todos[ti].text);
+            if (m_editMode == ED_EDIT_TODO && m_editPi == pi && m_editTi == ti)
+                setEditCaretFromPoint(x, contentY);
+        }
+        return;
+    }
     if (!m_draggingCard) return;
     ReleaseCapture();
     if (m_dragPi >= 0 && m_dragPi < (int)m_projects.size() &&
@@ -2055,7 +2316,9 @@ void App::onLButtonDown(float x, float y) {
         float dlgW = 220, dlgH = 230, dlgX = (m_w - dlgW) / 2, dlgY = (m_h - dlgH) / 2;
         float sy = -m_setScroll;
         float cy = dlgY + 14 + sy, cb = 18;
-        float fy = cy + cb + 8 + 18;
+        float bgY = cy + cb + 8;
+        float ly = bgY + cb + 8;
+        float fy = ly + 18;
         if (inRect(x, y, D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26))) {
             m_cursorBlink = 0;
             m_editRectDip = D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26);
@@ -2091,7 +2354,15 @@ void App::onLButtonDown(float x, float y) {
             requestRedraw();
             return;
         }
-        float fy = cy + cb + 8 + 18;
+        float bgY = cy + cb + 8;
+        if (inRect(x, y, D2D1::RectF(cbX, bgY, dlgX + dlgW - 16, bgY + cb))) {
+            m_cfg.transparent_bg = !m_cfg.transparent_bg;
+            saveAll();
+            applyWindowTransparency();
+            return;
+        }
+        float ly = bgY + cb + 8;
+        float fy = ly + 18;
         if (inRect(x, y, D2D1::RectF(dlgX + 16, fy, dlgX + dlgW - 16, fy + 26))) {
             beginEdit(ED_PREF_PREFIX, -1, -1, m_cfg.title_prefix);
             return;
@@ -2110,7 +2381,19 @@ void App::onLButtonDown(float x, float y) {
                 return;
             }
         }
-        float ay = tsY + tsH + 4 + 20;
+        float tsHintY = tsY + tsH + 4;
+        float tcTitleY = tsHintY + 8;
+        float swY = tcTitleY + 16;
+        for (int i = 0; i < 6; ++i) {
+            float cx = dlgX + 31 + i * 31;
+            if (inRect(x, y, D2D1::RectF(cx - 13, swY, cx + 13, swY + 26))) {
+                m_cfg.title_color = i;
+                saveAll();
+                requestRedraw();
+                return;
+            }
+        }
+        float ay = swY + 26 + 8;
         float say = ay + 18.0f;
         float optW = 52, optH = 22, optGap = 8;
         int perRow = 3;
@@ -2194,7 +2477,7 @@ void App::onLButtonDown(float x, float y) {
                             if (m_compositionText.empty()) setEditCaretFromPoint(x, contentY);
                             return;
                         }
-                        startEdit(ED_EDIT_TODO, h.pi, h.ti, m_projects[h.pi].todos[h.ti].text);
+                        armTodoDrag(h.pi, h.ti, contentY);
                         return;
                     case H_NEWTODO:
                         if (m_editMode == ED_NEW_TODO && m_editPi == h.pi) {

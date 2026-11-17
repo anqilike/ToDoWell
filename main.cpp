@@ -24,6 +24,10 @@ static const UINT kMenuSettings = 1001;
 static const UINT kMenuExit = 1002;
 static MMRESULT g_mmTimer = 0;
 static HWND g_timerHwnd = nullptr;
+static HWND g_mainHwnd = nullptr;
+static HWND g_hitShield = nullptr;
+static bool g_shieldEnabled = false;
+static const wchar_t* kShieldClass = L"ToDoWellHitShieldClass";
 
 static void AddTrayIcon(HWND hwnd) {
     NOTIFYICONDATAW nid = {};
@@ -42,6 +46,88 @@ static void RemoveTrayIcon(HWND hwnd) {
     nid.hWnd = hwnd;
     nid.uID = kTrayId;
     Shell_NotifyIconW(NIM_DELETE, &nid);
+}
+
+static void SyncHitShield() {
+    if (!g_hitShield || !g_mainHwnd) return;
+    RECT r;
+    if (!GetWindowRect(g_mainHwnd, &r)) return;
+    SetWindowPos(g_hitShield, nullptr, r.left, r.top, r.right - r.left, r.bottom - r.top,
+                 SWP_NOZORDER | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+}
+static void ShowHitShield(bool show) {
+    if (!g_hitShield || !g_mainHwnd) return;
+    if (show && IsWindowVisible(g_mainHwnd)) {
+        SyncHitShield();
+        ShowWindow(g_hitShield, SW_SHOWNOACTIVATE);
+        SetWindowPos(g_hitShield, nullptr, 0, 0, 0, 0,
+                     SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOOWNERZORDER);
+    } else {
+        ShowWindow(g_hitShield, SW_HIDE);
+    }
+}
+static LRESULT CALLBACK HitShieldProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
+    HWND main = g_mainHwnd;
+    switch (msg) {
+        case WM_NCHITTEST: return HTCLIENT;
+        case WM_MOUSEACTIVATE: return MA_NOACTIVATE;
+        case WM_ERASEBKGND: return 1;
+        case WM_PAINT: {
+            PAINTSTRUCT ps;
+            BeginPaint(hwnd, &ps);
+            EndPaint(hwnd, &ps);
+            return 0;
+        }
+        case WM_SETCURSOR:
+            if (LOWORD(lp) == HTCLIENT && main) {
+                POINT pt; GetCursorPos(&pt);
+                LRESULT ht = SendMessageW(main, WM_NCHITTEST, 0, MAKELPARAM(pt.x, pt.y));
+                LPCWSTR cursor = IDC_ARROW;
+                switch (ht) {
+                    case HTLEFT: case HTRIGHT: cursor = IDC_SIZEWE; break;
+                    case HTTOP: case HTBOTTOM: cursor = IDC_SIZENS; break;
+                    case HTTOPLEFT: case HTBOTTOMRIGHT: cursor = IDC_SIZENWSE; break;
+                    case HTTOPRIGHT: case HTBOTTOMLEFT: cursor = IDC_SIZENESW; break;
+                    default: break;
+                }
+                SetCursor(LoadCursorW(nullptr, cursor));
+                return TRUE;
+            }
+            break;
+        case WM_LBUTTONDOWN:
+        case WM_LBUTTONDBLCLK:
+            if (main) {
+                POINT pt; GetCursorPos(&pt);
+                LPARAM screenPt = MAKELPARAM(pt.x, pt.y);
+                LRESULT ht = SendMessageW(main, WM_NCHITTEST, 0, screenPt);
+                if (ht != HTCLIENT) {
+                    SendMessageW(main, msg == WM_LBUTTONDBLCLK ? WM_NCLBUTTONDBLCLK
+                                                               : WM_NCLBUTTONDOWN,
+                                 ht, screenPt);
+                    return 0;
+                }
+                SetForegroundWindow(main);
+                return SendMessageW(main, msg, wp, lp);
+            }
+            break;
+        case WM_LBUTTONUP:
+        case WM_MOUSEMOVE:
+        case WM_MOUSEWHEEL:
+        case WM_MOUSEHWHEEL:
+            if (main) return SendMessageW(main, msg, wp, lp);
+            break;
+    }
+    return DefWindowProcW(hwnd, msg, wp, lp);
+}
+static void CreateHitShield(HWND main) {
+    g_hitShield = CreateWindowExW(
+        WS_EX_LAYERED | WS_EX_TOOLWINDOW | WS_EX_NOACTIVATE,
+        kShieldClass, L"", WS_POPUP,
+        0, 0, 1, 1, main, nullptr, GetModuleHandleW(nullptr), nullptr);
+    if (g_hitShield) {
+        SetLayeredWindowAttributes(g_hitShield, 0, 1, LWA_ALPHA);
+        ShowWindow(g_hitShield, SW_HIDE);
+    }
 }
 
 static void CALLBACK mmTimerCb(UINT, UINT, DWORD_PTR, DWORD_PTR, DWORD_PTR) {
@@ -100,9 +186,11 @@ static int CalcWindowH() {
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
     switch (msg) {
         case WM_CREATE: {
+            g_mainHwnd = hwnd;
             g_gfx.init(hwnd);
             g_app = new App();
             g_app->create(hwnd);
+            CreateHitShield(hwnd);
             AddTrayIcon(hwnd);
             ApplyRoundCorners(hwnd);
             QueryPerformanceFrequency(&g_qpfFreq);
@@ -112,6 +200,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_mmTimer = timeSetEvent(1, 0, mmTimerCb, 0, TIME_PERIODIC);
             return 0;
         }
+        case WM_SHOWWINDOW:
+            ShowHitShield(wp != 0 && g_shieldEnabled);
+            return 0;
         case WM_PAINT: {
             PAINTSTRUCT ps; BeginPaint(hwnd, &ps);
             if (g_app) g_app->render();
@@ -131,9 +222,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             g_gfx.resize();
             if (g_app) g_app->onSize();
             ApplyRoundCorners(hwnd);
+            if (g_shieldEnabled) SyncHitShield();
             return 0;
         }
         case WM_MOVE: {
+            if (g_shieldEnabled) SyncHitShield();
             return 0;
         }
         case WM_CLOSE: {
@@ -255,8 +348,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp) {
             }
             return 0;
         }
+        case WM_TODOWELL_TRANSPARENCY:
+            g_shieldEnabled = (wp != 0);
+            ShowHitShield(g_shieldEnabled);
+            return 0;
         case WM_DESTROY: {
             RemoveTrayIcon(hwnd);
+            if (g_hitShield) { DestroyWindow(g_hitShield); g_hitShield = nullptr; }
+            g_mainHwnd = nullptr;
             if (g_app) { g_app->destroy(); delete g_app; g_app = nullptr; }
             if (g_mmTimer) { timeKillEvent(g_mmTimer); g_mmTimer = 0; }
             timeEndPeriod(1);
@@ -281,6 +380,16 @@ int WINAPI wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int nShow) {
     wc.hIcon = LoadIconW(hInst, MAKEINTRESOURCEW(IDI_APP));
     wc.hIconSm = wc.hIcon;
     RegisterClassExW(&wc);
+
+    WNDCLASSEXW shieldClass = {};
+    shieldClass.cbSize = sizeof(shieldClass);
+    shieldClass.style = CS_DBLCLKS;
+    shieldClass.lpfnWndProc = HitShieldProc;
+    shieldClass.hInstance = hInst;
+    shieldClass.hCursor = LoadCursorW(nullptr, IDC_ARROW);
+    shieldClass.hbrBackground = nullptr;
+    shieldClass.lpszClassName = kShieldClass;
+    RegisterClassExW(&shieldClass);
 
     {
         HDC hdc = GetDC(nullptr);

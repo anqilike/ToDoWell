@@ -4,6 +4,8 @@
 #include <vector>
 #include <string>
 
+constexpr UINT WM_TODOWELL_TRANSPARENCY = WM_APP + 2;
+
 // Layout constants, in DIPs (1 DIP = 1/96"; render target maps to physical px via DPI).
 namespace AppC {
 constexpr float TITLE_H = 38.0f;
@@ -171,8 +173,27 @@ int m_hoverAdd = 0; float m_addT = 0;
     float m_dropEndY = 0;
     int m_dropTarget = -1;         // final insertion index after adjust
 
+    // Todo-row drag reorder inside one project card.
+    bool m_todoDragArmed = false;
+    bool m_draggingTodo = false;
+    int m_todoDragPi = -1;
+    int m_todoDragFrom = -1;
+    int m_todoDragTarget = -1;
+    float m_todoDragStartY = 0;      // content-space y where the press began
+    float m_todoDragGrabOffset = 0;  // press y relative to the row top
+    float m_todoDragCurrentY = 0;    // floating row top in content space
+    float m_todoDragMinY = 0;
+    float m_todoDragMaxY = 0;
+    float m_todoDragRowH = 0;
+    std::vector<D2D1_RECT_F> m_todoDragRects;
+
     void rebuildHits();
     void beginCardDrag(int pi, float contentY);
+    void armTodoDrag(int pi, int ti, float contentY);
+    void beginTodoDrag(float contentY);
+    void updateTodoDrag(float contentY);
+    void finishTodoDrag();
+    void clearTodoDragState();
     float drawProjectCard(Gfx& g, int pi, float yContent, bool floating);
     void pollIme();
     bool detectLegacyIme();
@@ -202,6 +223,8 @@ int m_hoverAdd = 0; float m_addT = 0;
     void closeAbout();
     void requestClose();
     void requestRedraw();
+    void applyWindowTransparency();
+    void applyWindowOpacity(BYTE alpha);
     bool animating() const;
     float lerp(float a, float b, float t) const { return a + (b - a) * t; }
     void approach(float& cur, float target, float dt, float speed);

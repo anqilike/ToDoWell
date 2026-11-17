@@ -125,6 +125,12 @@ Config load_config() {
     if (ts && ts->type == JsonValue::Num) cfg.card_text_size = (int)ts->num;
     if (cfg.card_text_size < 0) cfg.card_text_size = 0;
     if (cfg.card_text_size > 3) cfg.card_text_size = 3;
+    const JsonValue* tc = root.find(L"title_color");
+    if (tc && tc->type == JsonValue::Num) cfg.title_color = (int)tc->num;
+    if (cfg.title_color < 0) cfg.title_color = 0;
+    if (cfg.title_color > 5) cfg.title_color = 5;
+    const JsonValue* tb = root.find(L"transparent_bg");
+    if (tb && tb->type == JsonValue::Bool) cfg.transparent_bg = tb->b;
     return cfg;
 }
 
@@ -135,11 +141,15 @@ void save_config(const Config& cfg) {
     JsonValue sa; sa.type = JsonValue::Num; sa.num = (double)cfg.snap_anim;
     JsonValue dp; dp.type = JsonValue::Num; dp.num = (double)cfg.default_pos;
     JsonValue ts; ts.type = JsonValue::Num; ts.num = (double)cfg.card_text_size;
+    JsonValue tc; tc.type = JsonValue::Num; tc.num = (double)cfg.title_color;
+    JsonValue tb; tb.type = JsonValue::Bool; tb.b = cfg.transparent_bg;
     root.obj.emplace_back(L"title_prefix", tp);
     root.obj.emplace_back(L"auto_start", as);
     root.obj.emplace_back(L"snap_anim", sa);
     root.obj.emplace_back(L"default_pos", dp);
     root.obj.emplace_back(L"card_text_size", ts);
+    root.obj.emplace_back(L"title_color", tc);
+    root.obj.emplace_back(L"transparent_bg", tb);
     write_file(exe_dir() + L"config.json", w_to_utf8(json_stringify(root, false)));
 }
 
