@@ -43,6 +43,10 @@ body {
 .hero h1 { font-size: 52px; line-height: 1.15; color: var(--title-fg); }
 .tagline { font-size: 22px; color: var(--title-fg); margin-top: 8px; }
 .subline { color: rgba(44,44,46,0.75); margin-top: 8px; }
+.hero-copy {
+  max-width: 620px; margin-top: 16px; color: rgba(44,44,46,0.76);
+  font-size: 15px; line-height: 1.8;
+}
 .badges { margin-top: 18px; display: flex; flex-wrap: wrap; gap: 8px; }
 .badges span {
   background: rgba(255,255,255,0.65); color: var(--title-fg);
